@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+app/sidfam.db
+firmware/
+.git/
+README.md

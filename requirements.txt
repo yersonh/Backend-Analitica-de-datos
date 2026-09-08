@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+mediapipe==0.10.13
+opencv-python-headless
+python-multipart
+numpy
+jinja2

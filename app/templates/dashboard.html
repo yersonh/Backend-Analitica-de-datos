@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>SIDFAM - Dashboard</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+        header { padding: 24px 32px; border-bottom: 1px solid #1e293b; }
+        h1 { margin: 0; font-size: 1.4rem; }
+        .subtitle { color: #94a3b8; font-size: 0.9rem; }
+        .container { padding: 24px 32px; }
+        .cards { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+        .card { background: #1e293b; border-radius: 10px; padding: 16px 20px; min-width: 140px; }
+        .card .label { color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; }
+        .card .value { font-size: 1.8rem; font-weight: 700; }
+        .risk-normal .value { color: #4ade80; }
+        .risk-alto .value { color: #f87171; }
+        .risk-medio .value { color: #fbbf24; }
+        .risk-sensor .value { color: #c084fc; }
+
+        .estado-sindatos .value { color: #94a3b8; }
+        .estado-normal .value { color: #4ade80; }
+        .estado-vigilancia .value { color: #60a5fa; }
+        .estado-alerta-medio .value { color: #fb923c; }
+        .estado-alerta-alto .value { color: #f87171; }
+        .estado-sensor .value { color: #c084fc; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1e293b; font-size: 0.9rem; }
+        th { color: #94a3b8; font-weight: 500; }
+        .badge { padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+        .badge-alto { background: #7f1d1d; color: #fecaca; }
+        .badge-medio { background: #78350f; color: #fde68a; }
+        .badge-bajo { background: #14532d; color: #bbf7d0; }
+        .badge-advertencia_sensor { background: #4c1d95; color: #ddd6fe; }
+        .empty { color: #64748b; padding: 20px 0; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>SIDFAM — Panel de fatiga</h1>
+        <div class="subtitle">Sesión: {{ session_id }}</div>
+    </header>
+    <div class="container">
+        {% set cs = current_status | default({}, true) %}
+        <div class="cards">
+            {% if not cs.has_any_data %}
+            <div class="card estado-sindatos">
+                <div class="label">Estado actual</div>
+                <div class="value">Sin datos</div>
+            </div>
+            {% elif cs.status == "advertencia_sensor" %}
+            <div class="card estado-sensor">
+                <div class="label">Estado actual</div>
+                <div class="value">Rev. sensor</div>
+            </div>
+            {% elif cs.status == "alerta" %}
+            <div class="card estado-alerta-{{ cs.risk_level }}">
+                <div class="label">Estado actual</div>
+                <div class="value">Alerta</div>
+            </div>
+            {% elif cs.status == "vigilancia" %}
+            <div class="card estado-vigilancia">
+                <div class="label">Estado actual</div>
+                <div class="value">Vigilancia</div>
+            </div>
+            {% else %}
+            <div class="card estado-normal">
+                <div class="label">Estado actual</div>
+                <div class="value">Normal</div>
+            </div>
+            {% endif %}
+            <div class="card risk-normal">
+                <div class="label">Normal</div>
+                <div class="value">{{ normal_count }}</div>
+            </div>
+            <div class="card risk-alto">
+                <div class="label">Riesgo alto</div>
+                <div class="value">{{ counts.get("alto", 0) }}</div>
+            </div>
+            <div class="card risk-medio">
+                <div class="label">Riesgo medio</div>
+                <div class="value">{{ counts.get("medio", 0) }}</div>
+            </div>
+            <div class="card risk-sensor">
+                <div class="label">Adv. sensor</div>
+                <div class="value">{{ counts.get("advertencia_sensor", 0) }}</div>
+            </div>
+            <div class="card">
+                <div class="label">Total eventos</div>
+                <div class="value">{{ events|length }}</div>
+            </div>
+        </div>
+
+        <h2>Historial reciente</h2>
+        {% if events %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha / Hora</th>
+                    <th>Nivel de riesgo</th>
+                    <th>Señal visual</th>
+                    <th>Señal fisiológica</th>
+                    <th>BPM</th>
+                    <th>EAR</th>
+                    <th>Detalle</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in events %}
+                <tr>
+                    <td>{{ e.timestamp }}</td>
+                    <td>
+                        <span class="badge badge-{{ e.risk_level }}">
+                            {{ "sensor" if e.risk_level == "advertencia_sensor" else e.risk_level }}
+                        </span>
+                    </td>
+                    <td>{{ "Sí" if e.visual_signal else "No" }}</td>
+                    <td>{{ "Sí" if e.physiological_signal else "No" }}</td>
+                    <td>{{ e.bpm if e.bpm is not none else "-" }}</td>
+                    <td>{{ e.ear if e.ear is not none else "-" }}</td>
+                    <td>{{ e.detail }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty">Aún no se han registrado episodios de fatiga.</p>
+        {% endif %}
+    </div>
+</body>
+</html>

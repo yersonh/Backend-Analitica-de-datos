@@ -1,0 +1,20 @@
+# Entorno virtual
+venv/
+.venv/
+
+# Base de datos local (se recrea al arrancar; en producción va en un volumen)
+app/sidfam.db
+*.db-journal
+*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
