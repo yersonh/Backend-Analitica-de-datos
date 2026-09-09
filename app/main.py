@@ -20,6 +20,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 
@@ -31,6 +32,13 @@ from .vision import face_analyzer
 app = FastAPI(title="SIDFAM Backend")
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Recursos estáticos del dashboard (imagen de fondo, etc.)
+app.mount(
+    "/imagenes",
+    StaticFiles(directory=str(Path(__file__).parent / "Imagenes")),
+    name="imagenes",
+)
 
 DEFAULT_SESSION_ID = "default"
 
