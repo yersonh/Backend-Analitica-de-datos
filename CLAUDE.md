@@ -56,8 +56,9 @@ Request flow for both ingest endpoints (`app/main.py`):
 Each analysis module exposes a **single module-level singleton** instantiated at
 import time (`face_analyzer`, `pulse_analyzer`, `fusion_engine`) — MediaPipe model
 creation and the sliding buffers are expensive/stateful, so they are shared across
-requests. This makes the app single-process and stateful in memory; the SQLite
-DB is the only durable store. Restarting uvicorn clears pulse buffers, the learned
+requests. This makes the app single-process and stateful in memory; the database
+(Postgres in prod, SQLite locally — see `app/database.py`) is the only durable
+store. Restarting uvicorn clears pulse buffers, the learned
 per-session `baseline_bpm`, and fusion timers, but keeps everything persisted
 (events + `reading_stats`).
 
@@ -96,11 +97,16 @@ event fires when the episode opens, again only if risk escalates `medio`→`alto
 (`detail` prefixed `"Escalada: "`), and the flag clears when the status leaves
 `alerta` / `advertencia_sensor` so the next occurrence counts as new.
 
-**`app/database.py`** — SQLite at `app/sidfam.db` (git-ignorable, created on
-startup). `fatigue_events` (one row per event, `sensor_warning` flags the sensor
-kind, timestamps as ISO strings) + `reading_stats` (per-session normal-reading
-counter). `init_db()` migrates missing columns with `ALTER TABLE` — never drops.
-Swap point for Postgres if the project goes to production.
+**`app/database.py`** — dual backend, chosen at import time: **PostgreSQL** (via
+`psycopg2`) when `DATABASE_URL` is set (Railway injects it), else **SQLite** at
+`app/sidfam.db` for local dev. Same public signatures for both; `main.py` is
+backend-agnostic. `_ph()` swaps `?`→`%s` for the Postgres branch; Postgres uses
+`SERIAL` + `TIMESTAMP`, SQLite keeps `AUTOINCREMENT` + ISO-string timestamps
+(`list_events()` normalizes the value back to an ISO string either way). Tables:
+`fatigue_events` (one row per event, `sensor_warning` flags the sensor kind) +
+`reading_stats` (per-session normal-reading counter). `init_db()` only
+`CREATE TABLE IF NOT EXISTS` — no migrations. On Railway the SQLite file is
+ephemeral (and `.dockerignore`d); Postgres is what survives deploys.
 
 **Sessions**: `session_id` (default `"default"`) is the multi-user seam — it keys
 the pulse buffers, fusion state, and every DB query. The prototype runs one

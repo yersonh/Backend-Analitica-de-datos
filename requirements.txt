@@ -5,3 +5,4 @@ opencv-python-headless
 python-multipart
 numpy
 jinja2
+psycopg2-binary
