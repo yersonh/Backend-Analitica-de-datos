@@ -174,14 +174,15 @@ def increment_normal_reading(session_id: str) -> None:
     """Suma 1 al contador de lecturas normales (frame o pulso sin evento de
     fatiga) de la sesión. Persiste igual que los eventos de riesgo.
 
-    El UPSERT con `normal_readings = normal_readings + 1` sin cualificar la
-    tabla es válido tanto en SQLite (>= 3.24) como en PostgreSQL (>= 9.5).
+    El UPSERT cualifica la columna con la tabla (`reading_stats.normal_readings`)
+    porque PostgreSQL la considera ambigua frente a `EXCLUDED` si va sin prefijo;
+    la forma cualificada es válida también en SQLite (>= 3.24).
     """
     sql = _ph(
         """
         INSERT INTO reading_stats (session_id, normal_readings)
         VALUES (?, 1)
-        ON CONFLICT (session_id) DO UPDATE SET normal_readings = normal_readings + 1
+        ON CONFLICT (session_id) DO UPDATE SET normal_readings = reading_stats.normal_readings + 1
         """
     )
     with get_connection() as conn:
