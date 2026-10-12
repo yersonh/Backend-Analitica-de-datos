@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SIDFAM — Analítica de datos</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+    <style>
+        :root {
+            --bg: #060b18;
+            --text: #e8eefc;
+            --muted: #9fb0d0;
+            --glass: rgba(20, 30, 54, 0.55);
+            --glass-strong: rgba(23, 34, 60, 0.72);
+            --border: rgba(148, 178, 235, 0.16);
+            --border-strong: rgba(148, 178, 235, 0.28);
+            --verde: #4ade80;
+            --rojo: #fb7185;
+            --ambar: #fbbf24;
+            --violeta: #c084fc;
+            --azul: #60a5fa;
+            --shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        body {
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+            color: var(--text);
+            background: var(--bg);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: ""; position: fixed; inset: 0; z-index: -2;
+            background: url("/imagenes/fondo.png") center / cover no-repeat;
+            filter: saturate(1.1) brightness(0.8);
+        }
+        body::after {
+            content: ""; position: fixed; inset: 0; z-index: -1;
+            background:
+                radial-gradient(1200px 700px at 8% -15%, rgba(96,165,250,0.16), transparent 55%),
+                linear-gradient(180deg, rgba(6,11,24,0.55) 0%, rgba(6,11,24,0.82) 60%, rgba(6,11,24,0.92) 100%);
+        }
+        .shell { max-width: 1180px; margin: 0 auto; padding: 28px 24px 64px; }
+        a { color: #9fc4ff; }
+
+        header {
+            display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+            padding: 20px 26px; border-radius: 20px;
+            background: var(--glass); border: 1px solid var(--border);
+            backdrop-filter: blur(22px) saturate(1.4); box-shadow: var(--shadow);
+        }
+        header h1 {
+            margin: 0; font-size: 1.45rem;
+            background: linear-gradient(100deg, #fff, #9fc4ff 55%, #c9b4ff);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        header .subtitle { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        select, button, input {
+            font: inherit; font-size: 0.85rem; color: var(--text);
+            background: rgba(10,16,32,0.6); border: 1px solid var(--border-strong);
+            border-radius: 10px; padding: 8px 12px;
+        }
+        select { max-width: 100%; }
+        button, .btn {
+            cursor: pointer; text-decoration: none; display: inline-block;
+            background: rgba(96,165,250,0.16); border: 1px solid rgba(96,165,250,0.4); color: #cfe0ff;
+            border-radius: 10px; padding: 8px 12px; font-size: 0.85rem;
+        }
+        button:hover, .btn:hover { background: rgba(96,165,250,0.28); }
+
+        .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 20px; }
+        .step {
+            padding: 12px 14px; border-radius: 14px; background: var(--glass); border: 1px solid var(--border);
+            font-size: 0.78rem; color: var(--muted);
+        }
+        .step b { display: block; color: var(--text); font-size: 0.88rem; margin-bottom: 2px; }
+        .step a { text-decoration: none; color: inherit; }
+
+        section.panel {
+            margin-top: 24px; border-radius: 22px; background: var(--glass);
+            border: 1px solid var(--border); backdrop-filter: blur(22px) saturate(1.4);
+            box-shadow: var(--shadow); padding: 22px 26px;
+        }
+        section.panel > h2 { margin: 0 0 4px; font-size: 1.1rem; }
+        section.panel > .lead { color: var(--muted); font-size: 0.86rem; margin: 0 0 16px; max-width: 80ch; }
+        h3 { font-size: 0.92rem; margin: 18px 0 10px; color: #cfdaf3; }
+
+        .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .kpi { padding: 14px 16px; border-radius: 14px; background: rgba(10,16,32,0.45); border: 1px solid var(--border); }
+        .kpi .label { font-size: 0.7rem; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+        .kpi .value { font-size: 1.6rem; font-weight: 800; margin-top: 6px; font-variant-numeric: tabular-nums; }
+        .kpi .hint { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .chart-box { position: relative; height: 280px; }
+        .chart-box.tall { height: 340px; }
+
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+        th, td { padding: 8px 10px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        th:first-child, td:first-child { text-align: left; }
+        thead th { color: var(--muted); font-weight: 600; font-size: 0.7rem; letter-spacing: 0.8px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        tbody tr { border-top: 1px solid var(--border); }
+
+        .heat td { text-align: center; font-size: 0.75rem; padding: 6px; }
+        .heat th { font-size: 0.65rem; }
+
+        .cm { border-collapse: separate; border-spacing: 6px; width: auto; }
+        .cm td { width: 110px; height: 70px; text-align: center; border-radius: 10px; font-size: 1.3rem; font-weight: 800; }
+        .cm th { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-align: center; }
+
+        pre.rules {
+            background: rgba(6,11,24,0.7); border: 1px solid var(--border); border-radius: 12px;
+            padding: 14px 16px; font-size: 0.78rem; line-height: 1.5; overflow-x: auto; color: #d6e2ff;
+        }
+        .warn {
+            background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.4); color: #fde68a;
+            padding: 12px 14px; border-radius: 12px; font-size: 0.84rem; margin-bottom: 14px;
+        }
+        .note { color: var(--muted); font-size: 0.82rem; }
+        .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+        .tag { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+        .loading { color: var(--muted); padding: 40px 0; text-align: center; }
+
+        footer { margin-top: 30px; text-align: center; color: var(--muted); font-size: 0.78rem; }
+
+        @media (max-width: 860px) {
+            .grid2 { grid-template-columns: 1fr; }
+            .steps { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 640px) {
+            .shell { padding: 16px 14px 48px; }
+            section.panel { padding: 18px 16px; }
+            .cm td { width: 80px; height: 56px; font-size: 1.1rem; }
+            .cm th { white-space: normal; }
+            header .controls { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div>
+            <h1>SIDFAM — Analítica de datos</h1>
+            <div class="subtitle">Proceso KDD sobre las lecturas de la sesión <b id="sess-label">{{ session_id }}</b></div>
+        </div>
+        <div class="controls">
+            <select id="session-select" aria-label="Sesión"></select>
+            <select id="window-select" aria-label="Ventana">
+                <option value="60">Ventana 1 min</option>
+                <option value="30">Ventana 30 s</option>
+                <option value="10">Ventana 10 s</option>
+            </select>
+            <a class="btn" id="csv-raw" href="#">Lecturas CSV</a>
+            <a class="btn" id="csv-win" href="#">Dataset CSV</a>
+            <a class="btn" href="/">← Panel en vivo</a>
+        </div>
+    </header>
+
+    <div class="steps">
+        <div class="step"><a href="#calidad"><b>1 · Selección</b>lecturas de la sesión</a></div>
+        <div class="step"><a href="#calidad"><b>2 · Preprocesamiento</b>limpieza y calidad</a></div>
+        <div class="step"><a href="#descriptiva"><b>3 · Transformación</b>ventanas y variables</a></div>
+        <div class="step"><a href="#clustering"><b>4 · Minería</b>K-Means, árbol, anomalías</a></div>
+        <div class="step"><a href="#clasificacion"><b>5 · Evaluación</b>métricas y validación</a></div>
+    </div>
+
+    <div id="content"><div class="loading">Calculando analítica…</div></div>
+
+    <section class="panel" id="kss">
+        <h2>Autoreporte de somnolencia (KSS)</h2>
+        <p class="lead">Durante las pruebas, la persona monitoreada indica cada 5 minutos qué tan somnolienta se siente en la escala de Karolinska (1 = muy alerta, 9 = muy somnolienta, luchando contra el sueño). Estas respuestas son la etiqueta real con la que se evalúa el árbol de decisión.</p>
+        <form id="kss-form" class="controls">
+            <select id="kss-value" aria-label="Valor KSS">
+                <option value="1">1 · Extremadamente alerta</option>
+                <option value="2">2 · Muy alerta</option>
+                <option value="3" selected>3 · Alerta</option>
+                <option value="4">4 · Bastante alerta</option>
+                <option value="5">5 · Ni alerta ni somnoliento</option>
+                <option value="6">6 · Algunos signos de sueño</option>
+                <option value="7">7 · Somnoliento, sin esfuerzo para seguir despierto</option>
+                <option value="8">8 · Somnoliento, con esfuerzo para seguir despierto</option>
+                <option value="9">9 · Muy somnoliento, luchando contra el sueño</option>
+            </select>
+            <input id="kss-note" placeholder="Nota (opcional)">
+            <button type="submit">Registrar</button>
+            <span class="note" id="kss-msg"></span>
+        </form>
+    </section>
+
+    <footer>SIDFAM · minería de datos con pandas y scikit-learn (proceso KDD / CRISP-DM)</footer>
+</div>
+
+<script>
+let SESSION = {{ session_id | tojson }};
+const PARAMS = new URLSearchParams(location.search);
+let VENTANA = PARAMS.get("ventana") || "60";
+const C = { verde: "#4ade80", ambar: "#fbbf24", rojo: "#fb7185", azul: "#60a5fa", violeta: "#c084fc", gris: "#94a3b8" };
+const STATUS_COLOR = { normal: C.verde, vigilancia: C.azul, alerta: C.rojo, advertencia_sensor: C.violeta };
+const CLUSTER_COLORS = [C.verde, C.ambar, C.rojo, C.azul, C.violeta, C.gris];
+
+Chart.defaults.color = "#9fb0d0";
+Chart.defaults.borderColor = "rgba(148,178,235,0.12)";
+Chart.defaults.font.family = '"Segoe UI", system-ui, sans-serif';
+
+const charts = [];
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const n = (v, d = 2) => (v === null || v === undefined) ? "—" : Number(v).toLocaleString("es-CO", { maximumFractionDigits: d, minimumFractionDigits: 0 });
+const pct = (v) => v === null || v === undefined ? "—" : n(v * 100, 1) + " %";
+
+function chart(id, cfg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    charts.push(new Chart(el, cfg));
+}
+
+function clusterColor(name, names) {
+    if (name === "Alerta") return C.verde;
+    if (name === "Somnolencia") return C.rojo;
+    if (name.startsWith("Intermedio")) return names.filter(x => x.startsWith("Intermedio")).length > 1
+        ? CLUSTER_COLORS[3 + names.indexOf(name) % 3] : C.ambar;
+    return C.gris;
+}
+
+function heatColor(v) {
+    if (v === null) return "transparent";
+    const a = Math.min(Math.abs(v), 1) * 0.75;
+    return v >= 0 ? `rgba(96,165,250,${a})` : `rgba(251,113,133,${a})`;
+}
+
+function renderQuality(q) {
+    const a = q.atipicos_eliminados || {};
+    return `
+    <section class="panel" id="calidad">
+        <h2>1–2 · Selección y preprocesamiento</h2>
+        <p class="lead">Se toman todas las lecturas crudas de la sesión (tabla <code>sensor_readings</code>) y se revisa su calidad: duplicados, faltantes, lecturas imposibles y atípicos. Los valores problemáticos se reemplazan por nulos en vez de borrar la fila completa.</p>
+        <div class="kpis">
+            <div class="kpi"><div class="label">Registros</div><div class="value">${n(q.registros_iniciales, 0)}</div><div class="hint">${n(q.lecturas_frame,0)} frames · ${n(q.lecturas_pulso,0)} pulso</div></div>
+            <div class="kpi"><div class="label">Duplicados</div><div class="value">${n(q.duplicados_eliminados, 0)}</div><div class="hint">eliminados</div></div>
+            <div class="kpi"><div class="label">Frames sin rostro</div><div class="value">${n(q.frames_sin_rostro, 0)}</div><div class="hint">${n(q.pct_frames_sin_rostro,1)} % de los frames</div></div>
+            <div class="kpi"><div class="label">BPM implausibles</div><div class="value">${n(q.bpm_implausibles, 0)}</div><div class="hint">fuera de 30–220 (error de sensor)</div></div>
+            <div class="kpi"><div class="label">Inconsistentes</div><div class="value">${n(q.valores_inconsistentes, 0)}</div><div class="hint">EAR/MAR fuera de rango</div></div>
+            <div class="kpi"><div class="label">Atípicos BPM</div><div class="value">${n(a.bpm || 0, 0)}</div><div class="hint">regla IQR × 3</div></div>
+            <div class="kpi"><div class="label">Pérdidas de comunicación</div><div class="value">${n(q.perdidas_comunicacion, 0)}</div><div class="hint">${n(q.segundos_sin_comunicacion, 0)} s sin lecturas (huecos &gt; 10 s)</div></div>
+            <div class="kpi"><div class="label">Sesiones / personas</div><div class="value">${n(q.sesiones, 0)} / ${n(q.personas, 0)}</div><div class="hint">persona = texto antes de "_"</div></div>
+        </div>
+    </section>`;
+}
+
+function renderDescriptive(d, params) {
+    const L = params.etiquetas_variables;
+    const st = d.estadisticos;
+    const rows = Object.keys(st).map(k => `<tr><td>${esc(L[k])}</td><td>${n(st[k].n,0)}</td><td>${n(st[k].media)}</td><td>${n(st[k].desv)}</td><td>${n(st[k].min)}</td><td>${n(st[k].p50)}</td><td>${n(st[k].max)}</td></tr>`).join("");
+
+    let heat = "";
+    if (d.correlacion) {
+        const vars = d.correlacion.variables;
+        heat = `<h3>Matriz de correlación (Pearson)</h3><div class="table-wrap"><table class="heat"><thead><tr><th></th>${vars.map(v => `<th>${esc(L[v])}</th>`).join("")}</tr></thead><tbody>` +
+            d.correlacion.matriz.map((row, i) => `<tr><th style="text-align:left">${esc(L[vars[i]])}</th>${row.map(v => `<td style="background:${heatColor(v)}">${n(v)}</td>`).join("")}</tr>`).join("") +
+            `</tbody></table></div><p class="note">Azul = correlación positiva, rojo = negativa. Por ejemplo, una correlación negativa entre EAR medio y PERCLOS es lo esperado: cuanto menos abiertos los ojos, mayor el porcentaje de tiempo con ojos cerrados.</p>`;
+    }
+
+    const est = d.medias_por_estado || {};
+    const estKeys = Object.keys(est);
+    const byState = estKeys.length ? `<h3>Promedio de cada variable según el estado de la fusión</h3><div class="table-wrap"><table><thead><tr><th>Variable</th>${estKeys.map(s => `<th>${esc(s)}</th>`).join("")}</tr></thead><tbody>` +
+        Object.keys(L).map(v => `<tr><td>${esc(L[v])}</td>${estKeys.map(s => `<td>${n(est[s][v])}</td>`).join("")}</tr>`).join("") + `</tbody></table></div>` : "";
+
+    return `
+    <section class="panel" id="descriptiva">
+        <h2>3 · Transformación y análisis descriptivo</h2>
+        <p class="lead">Las lecturas de cámara (~cada 1,5 s) y de pulso (~cada 2 s) llegan en instantes distintos. Para integrarlas se agrupan en ventanas de ${params.ventana_s >= 60 ? (params.ventana_s / 60) + " min" : params.ventana_s + " s"} y en cada una se calculan las variables: EAR medio, PERCLOS (porcentaje de frames con ojos cerrados), MAR máximo, número de bostezos, inclinación media, BPM medio, su desviación y la caída porcentual del BPM respecto al basal de la persona. Resultado: <b>${n(d.ventanas_totales,0)}</b> ventanas, <b>${n(d.ventanas_completas,0)}</b> con todas las variables.</p>
+        <h3>Serie temporal por ventana</h3>
+        <div class="chart-box tall"><canvas id="ch-serie"></canvas></div>
+        <div class="grid2">
+            <div><h3>Distribución de ventanas por estado</h3><div class="chart-box"><canvas id="ch-estados"></canvas></div></div>
+            <div><h3>Episodios de fatiga por hora del día</h3><div class="chart-box"><canvas id="ch-hora"></canvas></div></div>
+        </div>
+        <h3>Frecuencia de episodios de fatiga por día</h3>
+        <div class="chart-box"><canvas id="ch-dia"></canvas></div>
+        <h3>Estadísticos descriptivos por ventana</h3>
+        <div class="table-wrap"><table><thead><tr><th>Variable</th><th>n</th><th>Media</th><th>Desv.</th><th>Mín.</th><th>Mediana</th><th>Máx.</th></tr></thead><tbody>${rows}</tbody></table></div>
+        ${byState}
+        ${heat}
+    </section>`;
+}
+
+function chartsDescriptive(d) {
+    const s = d.serie_temporal || [];
+    const labels = s.map(r => (r.timestamp || "").slice(11, 19));
+    chart("ch-serie", {
+        type: "line",
+        data: { labels, datasets: [
+            { label: "BPM medio", data: s.map(r => r.bpm_mean), borderColor: C.rojo, backgroundColor: C.rojo, yAxisID: "y", pointRadius: 0, borderWidth: 1.6, tension: 0.25, spanGaps: true },
+            { label: "PERCLOS (%)", data: s.map(r => r.perclos), borderColor: C.ambar, backgroundColor: C.ambar, yAxisID: "y1", pointRadius: 0, borderWidth: 1.4, tension: 0.25, spanGaps: true },
+            { label: "EAR medio × 100", data: s.map(r => r.ear_mean === null ? null : r.ear_mean * 100), borderColor: C.azul, backgroundColor: C.azul, yAxisID: "y1", pointRadius: 0, borderWidth: 1.4, tension: 0.25, spanGaps: true },
+        ]},
+        options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+            scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { position: "left", title: { display: true, text: "BPM" } },
+                      y1: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: "% / EAR×100" } } } }
+    });
+
+    const dist = d.distribucion_estados || {};
+    const keys = Object.keys(dist);
+    chart("ch-estados", {
+        type: "bar",
+        data: { labels: keys, datasets: [{ data: keys.map(k => dist[k]), backgroundColor: keys.map(k => STATUS_COLOR[k] || C.gris), borderRadius: 6 }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: "ventanas" } } } }
+    });
+
+    const dia = d.eventos_por_dia || {};
+    const dias = Object.keys(dia);
+    chart("ch-dia", {
+        type: "bar",
+        data: { labels: dias, datasets: [{ data: dias.map(k => dia[k]), backgroundColor: C.ambar, borderRadius: 4 }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "episodios" } } } }
+    });
+
+    const h = d.eventos_por_hora || {};
+    const hours = [...Array(24).keys()];
+    chart("ch-hora", {
+        type: "bar",
+        data: { labels: hours.map(x => x + "h"), datasets: [{ data: hours.map(x => h[x] || 0), backgroundColor: C.rojo, borderRadius: 4 }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "episodios" } } } }
+    });
+}
+
+function renderCluster(c, params) {
+    if (!c.disponible) return `<section class="panel" id="clustering"><h2>4a · Clustering K-Means</h2><div class="empty">${esc(c.mensaje)}</div></section>`;
+    const L = params.etiquetas_variables;
+    const names = c.grupos.map(g => g.nombre);
+    const vars = Object.keys(L);
+    const cent = `<div class="table-wrap"><table><thead><tr><th>Grupo</th><th>Ventanas</th>${vars.map(v => `<th>${esc(L[v])}</th>`).join("")}</tr></thead><tbody>` +
+        c.grupos.map(g => `<tr><td><span class="tag" style="background:${clusterColor(g.nombre, names)}33;color:${clusterColor(g.nombre, names)}">${esc(g.nombre)}</span></td><td>${g.tamano} (${n(g.porcentaje,1)} %)</td>${vars.map(v => `<td>${n(g.centroide[v])}</td>`).join("")}</tr>`).join("") +
+        `</tbody></table></div>`;
+    const cr = c.cruce_cluster_vs_fusion;
+    const cross = `<div class="table-wrap"><table><thead><tr><th>Grupo \\ estado fusión</th>${cr.columnas.map(x => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>` +
+        cr.filas.map((f, i) => `<tr><td>${esc(f)}</td>${cr.valores[i].map(v => `<td>${v}</td>`).join("")}</tr>`).join("") + `</tbody></table></div>`;
+    return `
+    <section class="panel" id="clustering">
+        <h2>4a · Clustering con K-Means (no supervisado)</h2>
+        <p class="lead">Sin usar ninguna etiqueta, K-Means agrupa las ventanas por similitud en las 8 variables (estandarizadas con z-score). El número de grupos se elige con el coeficiente de silueta y cada grupo se nombra según su centroide: mayor PERCLOS, caída de BPM y bostezos → "Somnolencia".</p>
+        <div class="kpis">
+            <div class="kpi"><div class="label">Grupos (k)</div><div class="value">${c.k}</div></div>
+            <div class="kpi"><div class="label">Silueta</div><div class="value">${n(c.silueta)}</div><div class="hint">−1 a 1; > 0,25 = estructura razonable</div></div>
+            <div class="kpi"><div class="label">ARI vs. fusión</div><div class="value">${n(c.ari_vs_fusion)}</div><div class="hint">acuerdo con las reglas (0 = azar, 1 = total)</div></div>
+            <div class="kpi"><div class="label">Varianza PCA</div><div class="value">${n((c.pca_varianza_explicada[0] + c.pca_varianza_explicada[1]) * 100, 1)} %</div><div class="hint">explicada por el gráfico 2D</div></div>
+        </div>
+        <div class="grid2">
+            <div><h3>Ventanas proyectadas con PCA (2 componentes)</h3><div class="chart-box tall"><canvas id="ch-pca"></canvas></div></div>
+            <div><h3>Coeficiente de silueta según k</h3><div class="chart-box tall"><canvas id="ch-sil"></canvas></div></div>
+        </div>
+        <h3>Centroides de cada grupo (unidades originales)</h3>${cent}
+        <h3>Grupos vs. estado de la fusión por reglas</h3>${cross}
+    </section>`;
+}
+
+function chartsCluster(c) {
+    if (!c.disponible) return;
+    const names = c.grupos.map(g => g.nombre);
+    chart("ch-pca", {
+        type: "scatter",
+        data: { datasets: names.map(nm => ({
+            label: nm, data: c.puntos_pca.filter(p => p.cluster === nm).map(p => ({ x: p.x, y: p.y })),
+            backgroundColor: clusterColor(nm, names) + "bb", pointRadius: 3.5 })) },
+        options: { maintainAspectRatio: false, scales: { x: { title: { display: true, text: "CP1" } }, y: { title: { display: true, text: "CP2" } } } }
+    });
+    const ks = Object.keys(c.silueta_por_k);
+    chart("ch-sil", {
+        type: "bar",
+        data: { labels: ks.map(k => "k=" + k), datasets: [{ data: ks.map(k => c.silueta_por_k[k]), backgroundColor: ks.map(k => +k === c.k ? C.azul : "rgba(96,165,250,0.35)"), borderRadius: 6 }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+    });
+}
+
+function renderClassify(k) {
+    if (!k.disponible) return `<section class="panel" id="clasificacion"><h2>4b · Clasificación con árbol de decisión</h2><div class="empty">${esc(k.mensaje)}${k.fuente_etiqueta ? "<br>Etiqueta: " + esc(k.fuente_etiqueta) : ""}</div></section>`;
+    const m = k.metricas, cm = k.matriz_confusion.valores;
+    const maxCm = Math.max(...cm.flat(), 1);
+    const cell = (v, ok) => `<td style="background:${ok ? "rgba(74,222,128," : "rgba(251,113,133,"}${0.12 + 0.6 * v / maxCm})">${v}</td>`;
+    const comp = k.comparacion_modelos.length ? `<h3>Comparación de algoritmos (validación cruzada ${esc(k.validacion_cruzada)}, ${k.folds_validacion_cruzada} particiones, F1)</h3>
+        <div class="table-wrap"><table><thead><tr><th>Modelo</th><th>F1 medio</th><th>Desv.</th></tr></thead><tbody>` +
+        k.comparacion_modelos.map(r => `<tr><td>${esc(r.modelo)}</td><td>${n(r.f1_medio, 3)}</td><td>± ${n(r.f1_desv, 3)}</td></tr>`).join("") + `</tbody></table></div>` : "";
+    return `
+    <section class="panel" id="clasificacion">
+        <h2>4b · Clasificación con árbol de decisión (supervisado) y evaluación</h2>
+        <p class="lead">El árbol aprende a predecir si una ventana corresponde a fatiga a partir de las 8 variables. Se entrena con una parte de las ventanas y se evalúa con otra que el modelo no vio. Etiqueta usada: <b>${esc(k.fuente_etiqueta)}</b>.</p>
+        <p class="note" style="margin-top:-8px">Partición entrenamiento/prueba: ${esc(k.particion)}</p>
+        ${k.advertencia ? `<div class="warn">${esc(k.advertencia)}</div>` : ""}
+        <div class="kpis">
+            <div class="kpi"><div class="label">Exactitud</div><div class="value">${pct(m.exactitud)}</div><div class="hint">base (clase mayoritaria): ${pct(m.exactitud_clasificador_base)}</div></div>
+            <div class="kpi"><div class="label">Precisión</div><div class="value">${pct(m.precision)}</div><div class="hint">de las alertas, cuántas eran fatiga</div></div>
+            <div class="kpi"><div class="label">Recall</div><div class="value">${pct(m.recall)}</div><div class="hint">de la fatiga real, cuánta se detectó</div></div>
+            <div class="kpi"><div class="label">F1</div><div class="value">${n(m.f1, 3)}</div><div class="hint">media armónica precisión/recall</div></div>
+            <div class="kpi"><div class="label">Ventanas</div><div class="value">${k.n_entrenamiento + k.n_prueba}</div><div class="hint">${k.clases.fatiga} fatiga · ${k.clases.sin_fatiga} sin fatiga</div></div>
+        </div>
+        <div class="grid2">
+            <div>
+                <h3>Matriz de confusión (conjunto de prueba)</h3>
+                <div class="table-wrap"><table class="cm"><thead><tr><th></th><th>Predicho: sin fatiga</th><th>Predicho: fatiga</th></tr></thead><tbody>
+                    <tr><th>Real: sin fatiga</th>${cell(cm[0][0], true)}${cell(cm[0][1], false)}</tr>
+                    <tr><th>Real: fatiga</th>${cell(cm[1][0], false)}${cell(cm[1][1], true)}</tr>
+                </tbody></table></div>
+                <p class="note">Verde = aciertos. Abajo a la izquierda están los falsos negativos (fatiga no detectada), el error más costoso en este problema.</p>
+            </div>
+            <div><h3>Importancia de cada variable en el árbol</h3><div class="chart-box"><canvas id="ch-imp"></canvas></div></div>
+        </div>
+        <h3>Reglas aprendidas por el árbol</h3>
+        <pre class="rules">${esc(k.reglas)}</pre>
+        ${comp}
+    </section>`;
+}
+
+function chartsClassify(k) {
+    if (!k.disponible) return;
+    const imp = k.importancia_variables;
+    chart("ch-imp", {
+        type: "bar",
+        data: { labels: imp.map(r => r.variable), datasets: [{ data: imp.map(r => r.importancia), backgroundColor: C.violeta, borderRadius: 4 }] },
+        options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, max: 1 } } }
+    });
+}
+
+function renderAnomalies(a, params) {
+    if (!a.disponible) return `<section class="panel" id="anomalias"><h2>4c · Detección de anomalías</h2><div class="empty">${esc(a.mensaje)}</div></section>`;
+    const L = params.etiquetas_variables;
+    const rows = a.anomalias.map(r => `<tr><td>${esc((r.timestamp || "").replace("T", " "))}</td><td>${esc(r.estado_fusion)}</td><td>${esc(r.variable_mas_atipica)}</td><td>${n(r.puntaje_anomalia, 3)}</td><td>${n(r.ear_mean, 3)}</td><td>${n(r.perclos, 1)}</td><td>${n(r.yawn_count, 0)}</td><td>${n(r.tilt_abs_mean, 1)}</td><td>${n(r.bpm_mean, 1)}</td><td>${n(r.bpm_drop_pct, 1)}</td></tr>`).join("");
+    return `
+    <section class="panel" id="anomalias">
+        <h2>4c · Detección de anomalías con Isolation Forest</h2>
+        <p class="lead">Isolation Forest marca las ventanas cuya combinación de variables se aleja del patrón general (${esc(a.algoritmo)}). Pueden ser episodios de fatiga intensos o problemas de captura (mala iluminación, sensor mal puesto) que conviene revisar. Se detectaron <b>${a.anomalias_detectadas}</b> de ${a.ventanas_analizadas} ventanas.</p>
+        ${rows ? `<div class="table-wrap"><table><thead><tr><th>Ventana</th><th>Estado</th><th>Variable más atípica</th><th>Puntaje</th><th>${esc(L.ear_mean)}</th><th>${esc(L.perclos)}</th><th>${esc(L.yawn_count)}</th><th>${esc(L.tilt_abs_mean)}</th><th>${esc(L.bpm_mean)}</th><th>${esc(L.bpm_drop_pct)}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Sin anomalías.</div>`}
+    </section>`;
+}
+
+async function loadSessions() {
+    try {
+        const r = await fetch("/sesiones").then(r => r.json());
+        const sel = document.getElementById("session-select");
+        const list = r.sesiones || [];
+        const total = list.reduce((a, s) => a + s.lecturas, 0);
+        if (SESSION !== "todas" && !list.some(s => s.session_id === SESSION)) list.unshift({ session_id: SESSION, lecturas: 0 });
+        list.unshift({ session_id: "todas", lecturas: total, etiqueta: "Todas las sesiones" });
+        sel.innerHTML = list.map(s => `<option value="${esc(s.session_id)}" ${s.session_id === SESSION ? "selected" : ""}>${esc(s.etiqueta || s.session_id)} (${s.lecturas} lecturas)</option>`).join("");
+        const ws = document.getElementById("window-select");
+        ws.value = VENTANA;
+        const go = () => { location.search = "?session_id=" + encodeURIComponent(sel.value) + "&ventana=" + ws.value; };
+        sel.onchange = go;
+        ws.onchange = go;
+    } catch (e) { console.error(e); }
+}
+
+async function loadReport() {
+    const q = "session_id=" + encodeURIComponent(SESSION) + "&ventana=" + encodeURIComponent(VENTANA);
+    document.getElementById("csv-raw").href = "/lecturas.csv?session_id=" + encodeURIComponent(SESSION);
+    document.getElementById("csv-win").href = "/analitica/dataset.csv?" + q;
+    const box = document.getElementById("content");
+    try {
+        const r = await fetch("/analitica/reporte?" + q).then(r => r.json());
+        charts.splice(0).forEach(c => c.destroy());
+        if (!r.disponible) {
+            box.innerHTML = `<section class="panel"><div class="empty">${esc(r.mensaje)}<br><br>Para probar sin hardware: <code>python tools/generar_datos.py</code> y luego abre <a href="?session_id=simulada">la sesión "simulada"</a>.</div></section>`;
+            return;
+        }
+        box.innerHTML = renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
+            renderCluster(r.clustering, r.parametros) + renderClassify(r.clasificacion) + renderAnomalies(r.anomalias, r.parametros);
+        chartsDescriptive(r.descriptiva);
+        chartsCluster(r.clustering);
+        chartsClassify(r.clasificacion);
+    } catch (e) {
+        console.error(e);
+        box.innerHTML = `<section class="panel"><div class="empty">No se pudo calcular la analítica. Revisa la consola del servidor.</div></section>`;
+    }
+}
+
+document.getElementById("kss-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (SESSION === "todas") { document.getElementById("kss-msg").textContent = "Elige una sesión concreta para registrar el KSS"; return; }
+    const body = new URLSearchParams({ session_id: SESSION, kss: document.getElementById("kss-value").value });
+    const note = document.getElementById("kss-note").value.trim();
+    if (note) body.append("note", note);
+    const msg = document.getElementById("kss-msg");
+    try {
+        const r = await fetch("/autoreporte", { method: "POST", body });
+        msg.textContent = r.ok ? "Registrado ✓" : "Error al registrar";
+        if (r.ok) document.getElementById("kss-note").value = "";
+    } catch { msg.textContent = "Error de conexión"; }
+});
+
+loadSessions();
+loadReport();
+</script>
+</body>
+</html>

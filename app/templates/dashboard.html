@@ -301,9 +301,12 @@
                 <h1>SIDFAM — Panel de fatiga</h1>
                 <div class="subtitle">Sesión activa: <b>{{ session_id }}</b> · detección de fatiga en conductores</div>
             </div>
-            <div class="live" id="live">
-                <span class="dot"></span>
-                <span id="live-text">En vivo</span>
+                       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <a href="/analitica?session_id={{ session_id | urlencode }}" style="padding:9px 16px;border-radius:999px;background:rgba(96,165,250,0.14);border:1px solid rgba(96,165,250,0.4);color:#cfe0ff;font-size:0.8rem;font-weight:600;text-decoration:none">Analítica de datos →</a>
+                <div class="live" id="live">
+                    <span class="dot"></span>
+                    <span id="live-text">En vivo</span>
+                </div>
             </div>
         </header>
 

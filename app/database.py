@@ -11,8 +11,20 @@ Soporta DOS motores según el entorno, sin que el resto de la app se entere:
     de antes.
 
 Las firmas de las funciones públicas (init_db, save_event, list_events,
-event_counts_by_risk, increment_normal_reading, normal_reading_count) son
-idénticas en ambos casos: app/main.py no necesita cambiar.
+event_counts_by_risk, increment_normal_reading, normal_reading_count,
+save_reading, list_readings, save_self_report, list_self_reports,
+list_sessions) son idénticas en ambos casos: app/main.py no necesita cambiar.
+
+Tablas:
+  - fatigue_events   -> UNA fila por episodio de fatiga (o advertencia de sensor).
+  - reading_stats    -> contador de lecturas normales por sesión.
+  - sensor_readings  -> UNA fila por CADA lectura recibida (frame o pulso), con
+                        las métricas crudas y el estado de la fusión en ese
+                        instante. Es la tabla "de hechos" sobre la que se aplica
+                        la minería de datos (ver app/analytics.py).
+  - self_reports     -> autoreporte de somnolencia con la escala KSS
+                        (Karolinska Sleepiness Scale, 1-9). Es la etiqueta
+                        "real" (ground truth) para evaluar los modelos.
 
 Es un proyecto de curso con tráfico bajo, así que se abre/cierra una
 conexión por operación (patrón contextmanager) en vez de un pool.
@@ -59,6 +71,36 @@ CREATE TABLE IF NOT EXISTS reading_stats (
     session_id TEXT PRIMARY KEY,
     normal_readings INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS sensor_readings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    source TEXT NOT NULL,
+    face_detected INTEGER,
+    ear REAL,
+    mar REAL,
+    head_tilt_deg REAL,
+    eyes_closed INTEGER,
+    yawning INTEGER,
+    head_tilted INTEGER,
+    bpm REAL,
+    bpm_mean REAL,
+    bpm_std REAL,
+    baseline_bpm REAL,
+    implausible_reading INTEGER,
+    fusion_status TEXT,
+    risk_level TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_readings_session_ts ON sensor_readings (session_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS self_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    kss INTEGER NOT NULL CHECK (kss BETWEEN 1 AND 9),
+    note TEXT
+);
 """
 
 _SCHEMA_POSTGRES = """
@@ -78,6 +120,36 @@ CREATE TABLE IF NOT EXISTS fatigue_events (
 CREATE TABLE IF NOT EXISTS reading_stats (
     session_id TEXT PRIMARY KEY,
     normal_readings INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS sensor_readings (
+    id SERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    source TEXT NOT NULL,
+    face_detected INTEGER,
+    ear REAL,
+    mar REAL,
+    head_tilt_deg REAL,
+    eyes_closed INTEGER,
+    yawning INTEGER,
+    head_tilted INTEGER,
+    bpm REAL,
+    bpm_mean REAL,
+    bpm_std REAL,
+    baseline_bpm REAL,
+    implausible_reading INTEGER,
+    fusion_status TEXT,
+    risk_level TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_readings_session_ts ON sensor_readings (session_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS self_reports (
+    id SERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    kss INTEGER NOT NULL CHECK (kss BETWEEN 1 AND 9),
+    note TEXT
 );
 """
 
@@ -191,6 +263,23 @@ def increment_normal_reading(session_id: str) -> None:
         conn.commit()
 
 
+def add_normal_readings(session_id: str, n: int) -> None:
+    """Suma n lecturas normales de una vez (la usa el generador de datos sintéticos)."""
+    if n <= 0:
+        return
+    sql = _ph(
+        """
+        INSERT INTO reading_stats (session_id, normal_readings)
+        VALUES (?, ?)
+        ON CONFLICT (session_id) DO UPDATE SET normal_readings = reading_stats.normal_readings + EXCLUDED.normal_readings
+        """
+    )
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, (session_id, int(n)))
+        conn.commit()
+
+
 def normal_reading_count(session_id: str | None = None) -> int:
     sql = "SELECT COALESCE(SUM(normal_readings), 0) AS total FROM reading_stats"
     params: list = []
@@ -218,3 +307,135 @@ def event_counts_by_risk(session_id: str | None = None) -> dict[str, int]:
         cur.execute(_ph(sql), tuple(params))
         rows = cur.fetchall()
     return {row["risk_level"]: int(row["total"]) for row in rows}
+
+
+# ---------------------------------------------------------------------------
+# Lecturas crudas (tabla de hechos para la analítica)
+# ---------------------------------------------------------------------------
+
+_READING_COLUMNS = (
+    "session_id", "timestamp", "source", "face_detected", "ear", "mar",
+    "head_tilt_deg", "eyes_closed", "yawning", "head_tilted", "bpm",
+    "bpm_mean", "bpm_std", "baseline_bpm", "implausible_reading",
+    "fusion_status", "risk_level",
+)
+
+
+def _ts_value(timestamp: float):
+    ts = datetime.fromtimestamp(timestamp)
+    return ts if USE_POSTGRES else ts.isoformat(timespec="milliseconds")
+
+
+def _bool_or_none(v):
+    return None if v is None else int(bool(v))
+
+
+def save_reading(session_id: str, timestamp: float, source: str, *,
+                 face_detected=None, ear=None, mar=None, head_tilt_deg=None,
+                 eyes_closed=None, yawning=None, head_tilted=None,
+                 bpm=None, bpm_mean=None, bpm_std=None, baseline_bpm=None,
+                 implausible_reading=None, fusion_status=None,
+                 risk_level=None) -> None:
+    """Guarda una lectura individual (source = "frame" o "pulso")."""
+    values = (
+        session_id, _ts_value(timestamp), source, _bool_or_none(face_detected),
+        ear, mar, head_tilt_deg, _bool_or_none(eyes_closed), _bool_or_none(yawning),
+        _bool_or_none(head_tilted), bpm, bpm_mean, bpm_std, baseline_bpm,
+        _bool_or_none(implausible_reading), fusion_status, risk_level,
+    )
+    placeholders = ", ".join("?" for _ in _READING_COLUMNS)
+    sql = _ph(f"INSERT INTO sensor_readings ({', '.join(_READING_COLUMNS)}) VALUES ({placeholders})")
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, values)
+        conn.commit()
+
+
+def save_readings_bulk(rows: list[dict]) -> None:
+    """Inserción masiva (la usa el generador de datos sintéticos)."""
+    if not rows:
+        return
+    placeholders = ", ".join("?" for _ in _READING_COLUMNS)
+    sql = _ph(f"INSERT INTO sensor_readings ({', '.join(_READING_COLUMNS)}) VALUES ({placeholders})")
+    data = []
+    for r in rows:
+        data.append(tuple(
+            _ts_value(r["timestamp"]) if c == "timestamp"
+            else _bool_or_none(r.get(c)) if c in ("face_detected", "eyes_closed", "yawning",
+                                                  "head_tilted", "implausible_reading")
+            else r.get(c)
+            for c in _READING_COLUMNS
+        ))
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.executemany(sql, data)
+        conn.commit()
+
+
+def _iso_rows(rows) -> list[dict]:
+    out = [dict(r) for r in rows]
+    for r in out:
+        if isinstance(r.get("timestamp"), datetime):
+            r["timestamp"] = r["timestamp"].isoformat(timespec="milliseconds")
+    return out
+
+
+def list_readings(session_id: str | None = None, limit: int | None = None,
+                  newest_first: bool = False) -> list[dict]:
+    sql = "SELECT * FROM sensor_readings"
+    params: list = []
+    if session_id:
+        sql += " WHERE session_id = ?"
+        params.append(session_id)
+    sql += " ORDER BY timestamp DESC, id DESC" if newest_first else " ORDER BY timestamp ASC, id ASC"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph(sql), tuple(params))
+        return _iso_rows(cur.fetchall())
+
+
+def list_sessions() -> list[dict]:
+    """Sesiones que tienen lecturas, con su cantidad y rango de fechas."""
+    sql = """
+        SELECT session_id, COUNT(*) AS lecturas,
+               MIN(timestamp) AS desde, MAX(timestamp) AS hasta
+        FROM sensor_readings GROUP BY session_id ORDER BY MAX(timestamp) DESC
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql)
+        rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        for k in ("desde", "hasta"):
+            if isinstance(r.get(k), datetime):
+                r[k] = r[k].isoformat(timespec="seconds")
+        r["lecturas"] = int(r["lecturas"])
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Autoreporte KSS (etiqueta real para evaluar modelos supervisados)
+# ---------------------------------------------------------------------------
+
+def save_self_report(session_id: str, timestamp: float, kss: int, note: str | None = None) -> None:
+    sql = _ph("INSERT INTO self_reports (session_id, timestamp, kss, note) VALUES (?, ?, ?, ?)")
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, (session_id, _ts_value(timestamp), int(kss), note))
+        conn.commit()
+
+
+def list_self_reports(session_id: str | None = None) -> list[dict]:
+    sql = "SELECT * FROM self_reports"
+    params: list = []
+    if session_id:
+        sql += " WHERE session_id = ?"
+        params.append(session_id)
+    sql += " ORDER BY timestamp ASC"
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph(sql), tuple(params))
+        return _iso_rows(cur.fetchall())

@@ -47,7 +47,7 @@ PLAUSIBLE_BPM_MAX = 220      # por encima: lectura no fisiológica (error de sen
 @dataclass
 class PulseReading:
     bpm: float
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = field(default_factory=lambda: time.time())
 
 
 @dataclass

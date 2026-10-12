@@ -6,3 +6,5 @@ python-multipart
 numpy
 jinja2
 psycopg2-binary
+pandas
+scikit-learn
