@@ -261,6 +261,9 @@ class FusionEngine:
         has_any_data = bool(timestamps)
         data_is_fresh = has_any_data and (now - max(timestamps)) <= SIGNAL_FRESHNESS_SECONDS
 
+        vision = state.last_vision
+        pulse = state.last_pulse
+
         return {
             "status": status,
             "risk_level": risk_level,
@@ -268,11 +271,20 @@ class FusionEngine:
             "physiological_signal": physiological_signal,
             "implausible_reading": implausible,
             "detail": ", ".join(reasons),
-            "ear": state.last_vision.ear if state.last_vision else None,
-            "bpm": state.last_pulse.bpm_current if state.last_pulse else None,
-            "baseline_bpm": state.last_pulse.baseline_bpm if state.last_pulse else None,
+            "ear": vision.ear if vision else None,
+            "bpm": pulse.bpm_current if pulse else None,
+            "baseline_bpm": pulse.baseline_bpm if pulse else None,
             "data_is_fresh": data_is_fresh,
             "has_any_data": has_any_data,
+            # Detalle por canal para las tarjetas del dashboard (último valor conocido)
+            "face_detected": vision.face_detected if vision else None,
+            "mar": vision.mar if vision else None,
+            "head_tilt_deg": vision.head_tilt_deg if vision else None,
+            "eyes_closed": vision.eyes_closed if vision else False,
+            "yawning": vision.yawning if vision else False,
+            "head_tilted": vision.head_tilted if vision else False,
+            "bpm_mean": pulse.bpm_mean if pulse else None,
+            "bpm_std": pulse.bpm_std if pulse else None,
         }
 
 

@@ -37,7 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 
-from . import analytics, database
+from . import analytics, database, pulse, vision
 from .fusion import fusion_engine
 from .pulse import pulse_analyzer
 from .vision import face_analyzer
@@ -276,5 +276,13 @@ def dashboard(request: Request, session_id: str | None = None):
             "normal_count": normal_count,
             "current_status": current_status,
             "session_id": session_id,
+            # Umbrales reales para marcar el límite en las barras del dashboard
+            "thresholds": {
+                "ear": vision.EAR_THRESHOLD,
+                "mar": vision.MAR_THRESHOLD,
+                "head_tilt_deg": vision.HEAD_TILT_THRESHOLD_DEG,
+                "relative_drop": pulse.RELATIVE_DROP_THRESHOLD,
+                "low_variability_std": pulse.LOW_VARIABILITY_STD,
+            },
         },
     )
