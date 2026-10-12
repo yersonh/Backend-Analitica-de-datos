@@ -388,7 +388,7 @@
     </div>
 
     <script>
-        const SESSION = {{ session_id | tojson }};
+           const SESSION = JSON.parse('{{ session_id | tojson }}');
 
         const PALETTE = {
             normal:              { accent: "#4ade80", title: "Normal",          desc: "Sin señales de fatiga. El conductor se encuentra alerta." },

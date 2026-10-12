@@ -194,7 +194,7 @@
 </div>
 
 <script>
-let SESSION = {{ session_id | tojson }};
+let SESSION = JSON.parse('{{ session_id | tojson }}');
 const PARAMS = new URLSearchParams(location.search);
 let VENTANA = PARAMS.get("ventana") || "60";
 const C = { verde: "#4ade80", ambar: "#fbbf24", rojo: "#fb7185", azul: "#60a5fa", violeta: "#c084fc", gris: "#94a3b8" };
