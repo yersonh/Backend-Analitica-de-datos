@@ -18,7 +18,7 @@ Analítica de datos (ver app/analytics.py):
   GET  /analitica/reporte      -> proceso KDD completo (calidad, descriptiva,
                                   K-Means, árbol de decisión, anomalías).
   POST /autoreporte            -> autoreporte de somnolencia KSS (1-9).
-  GET  /analitica              -> página HTML con los resultados.
+  GET  /analitica              -> redirige a la sección de analítica del panel (/).
 
 Ejecutar en desarrollo:
   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -27,11 +27,12 @@ Ejecutar en desarrollo:
 import io
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
@@ -246,15 +247,22 @@ def self_report(kss: int = Form(...), session_id: str = Form(DEFAULT_SESSION_ID)
     return {"ok": True, "session_id": session_id, "kss": kss}
 
 
-@app.get("/analitica", response_class=HTMLResponse)
-def analytics_page(request: Request, session_id: str = DEFAULT_SESSION_ID):
-    """Página con los resultados de la minería de datos."""
-    return templates.TemplateResponse(request, "analitica.html", {"session_id": session_id})
+@app.get("/analitica")
+def analytics_page(session_id: str = DEFAULT_SESSION_ID):
+    """La analítica ahora está en la misma página del panel: redirige a esa sección."""
+    return RedirectResponse(url=f"/?session_id={quote(session_id)}#analitica")
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, session_id: str = DEFAULT_SESSION_ID):
-    """Dashboard simple con historial y frecuencia de eventos (RF09, RF10)."""
+def dashboard(request: Request, session_id: str | None = None):
+    """Panel único: estado en vivo, historial (RF09, RF10) y analítica de datos.
+
+    Si la URL no trae ?session_id=..., se muestra la sesión que recibió
+    lecturas más recientemente (así el enlace de Railway abre directo la prueba
+    en curso)."""
+    if not session_id:
+        sesiones = database.list_sessions()
+        session_id = sesiones[0]["session_id"] if sesiones else DEFAULT_SESSION_ID
     events = database.list_events(session_id=session_id, limit=100)
     counts = database.event_counts_by_risk(session_id=session_id)
     normal_count = database.normal_reading_count(session_id=session_id)
