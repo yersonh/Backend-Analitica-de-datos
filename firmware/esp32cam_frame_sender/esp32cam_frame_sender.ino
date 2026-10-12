@@ -7,6 +7,7 @@
   Ajustar:
     - WIFI_SSID / WIFI_PASSWORD
     - SERVER_HOST (IP o dominio del backend)
+    - DEVICE_API_KEY (si el backend la exige)
     - Modelo de cámara (CAMERA_MODEL_AI_THINKER es el más común)
 
   Requiere las librerías: esp32-camera (incluida en el core de
@@ -22,6 +23,9 @@ const char* WIFI_SSID     = "TU_RED_WIFI";
 const char* WIFI_PASSWORD = "TU_PASSWORD";
 const char* SERVER_HOST   = "http://192.168.1.100:8000";  // IP del backend en la red local
 const char* SESSION_ID    = "default";
+// Clave del dispositivo: el mismo valor que DEVICE_API_KEY en el backend.
+// Vacía ("") si el backend no la exige (desarrollo local).
+const char* DEVICE_API_KEY = "";
 
 const unsigned long FRAME_INTERVAL_MS = 1500;  // cada 1.5s (ajustable)
 
@@ -105,6 +109,9 @@ void sendFrame() {
 
   String boundary = "SIDFAMBoundary";
   http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+  if (strlen(DEVICE_API_KEY) > 0) {
+    http.addHeader("X-Device-Key", DEVICE_API_KEY);
+  }
 
   String bodyStart =
       "--" + boundary + "\r\n" +

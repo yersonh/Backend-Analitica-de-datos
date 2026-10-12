@@ -1,0 +1,443 @@
+{% extends "_base.html" %}
+{% block title %}SIDFAM — Usuarios y roles{% endblock %}
+
+{% block styles %}
+        .shell { max-width: 1240px; margin: 0 auto; padding: 24px 24px 64px; }
+        .topbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 20px; animation: fadeUp 0.6s both; }
+        .topbar h1 { margin: 0; font-size: 1.2rem; }
+        .topbar .sub { font-size: 0.8rem; color: var(--muted); }
+        .topbar .grow { flex: 1; }
+        .chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(140,180,255,0.08); border: 1px solid var(--line); font-size: 0.8rem; color: var(--ink-2); white-space: nowrap; text-decoration: none; }
+        a.chip:hover, button.chip:hover { background: rgba(140,180,255,0.16); color: var(--ink); cursor: pointer; }
+        .chip svg { width: 15px; height: 15px; }
+
+        .section-title { display: flex; align-items: center; gap: 10px; margin: 30px 0 14px; font-size: 0.74rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+        .section-title svg { width: 16px; height: 16px; color: var(--cyan); }
+        .section-title .grow { flex: 1; }
+
+        /* KPIs */
+        .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 20px; }
+        .kpi { padding: 16px 18px; animation: fadeUp 0.6s both; animation-delay: calc(var(--i) * 60ms); }
+        .kpi .k { display: flex; align-items: center; gap: 8px; font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+        .kpi .k i { width: 8px; height: 8px; border-radius: 3px; background: var(--c); box-shadow: 0 0 10px var(--c); }
+        .kpi .v { font-family: var(--mono); font-size: 2rem; font-weight: 600; margin-top: 8px; }
+
+        /* Roles */
+        .roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .role { padding: 22px; overflow: hidden; animation: fadeUp 0.6s both; animation-delay: calc(0.1s + var(--i) * 90ms); }
+        .role::after { content: ""; position: absolute; width: 220px; height: 220px; right: -80px; top: -110px; border-radius: 50%; background: var(--c); opacity: 0.16; filter: blur(50px); z-index: -1; }
+        .role .ico { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); }
+        .role .ico svg { width: 24px; height: 24px; }
+        .role h3 { margin: 14px 0 6px; font-size: 1.15rem; display: flex; align-items: center; gap: 10px; }
+        .role h3 small { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); font-weight: 400; }
+        .role p { margin: 0; font-size: 0.86rem; color: var(--ink-2); line-height: 1.5; min-height: 3em; }
+        .perms { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 7px; }
+        .perms li { display: flex; gap: 9px; align-items: flex-start; font-size: 0.82rem; color: var(--ink-2); }
+        .perms li svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+        .perms li.on svg { color: var(--c); }
+        .perms li.off { color: var(--muted); opacity: 0.55; text-decoration: line-through; text-decoration-color: rgba(125,143,179,0.5); }
+
+        /* Tabla */
+        .panel { padding: 20px 22px; animation: fadeUp 0.6s 0.2s both; }
+        .tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .tools .search { flex: 1; min-width: 200px; }
+        .seg { display: inline-flex; padding: 3px; border-radius: 12px; background: rgba(4,9,22,0.6); border: 1px solid var(--line); }
+        .seg button { border: 0; background: transparent; padding: 8px 12px; border-radius: 9px; font-size: 0.8rem; color: var(--ink-2); cursor: pointer; transition: background 0.2s, color 0.2s; }
+        .seg button.active { background: rgba(56,189,248,0.16); color: var(--ink); }
+        .table-wrap { overflow-x: auto; margin-top: 16px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        td { padding: 12px; border-bottom: 1px solid var(--line); font-size: 0.88rem; vertical-align: middle; }
+        tbody tr { transition: background 0.2s; animation: fadeUp 0.4s both; animation-delay: calc(var(--i) * 30ms); }
+        tbody tr:hover { background: rgba(140,180,255,0.05); }
+        tr.inactive td:not(:last-child) { opacity: 0.5; }
+        .person { display: flex; align-items: center; gap: 12px; }
+        .avatar { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-weight: 700; font-size: 0.85rem; flex: none; color: var(--ink); background: linear-gradient(135deg, color-mix(in srgb, var(--c) 45%, transparent), color-mix(in srgb, var(--c) 10%, transparent)); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); }
+        .person b { display: block; font-weight: 600; }
+        .person span { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+        .you { font-size: 0.64rem; padding: 1px 7px; border-radius: 6px; background: rgba(56,189,248,0.16); color: #bae6fd; margin-left: 6px; font-family: var(--font); letter-spacing: 0.06em; }
+        .mono { font-family: var(--mono); font-size: 0.82rem; }
+        .muted { color: var(--muted); }
+        .status { display: inline-flex; align-items: center; gap: 7px; font-size: 0.82rem; }
+        .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--verde); box-shadow: 0 0 8px var(--verde); }
+        .status.off::before { background: var(--gris); box-shadow: none; }
+        .tag-temp { display: inline-block; margin-left: 6px; font-size: 0.66rem; padding: 2px 7px; border-radius: 6px; background: rgba(251,191,36,0.14); color: #fde68a; border: 1px solid rgba(251,191,36,0.35); }
+        .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+        .icon-btn { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--line); background: rgba(140,180,255,0.06); color: var(--ink-2); cursor: pointer; transition: all 0.2s; }
+        .icon-btn:hover { background: rgba(140,180,255,0.16); color: var(--ink); border-color: var(--line-2); transform: translateY(-1px); }
+        .icon-btn.danger:hover { background: rgba(251,113,133,0.16); color: #fecdd3; border-color: rgba(251,113,133,0.45); }
+        .icon-btn.good:hover { background: rgba(52,211,153,0.16); color: #a7f3d0; border-color: rgba(52,211,153,0.45); }
+        .icon-btn svg { width: 16px; height: 16px; }
+        .icon-btn[disabled] { opacity: 0.3; cursor: not-allowed; transform: none; }
+        .empty { padding: 40px; text-align: center; color: var(--muted); }
+
+        /* Modal */
+        .modal-bg { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px; background: rgba(2,5,14,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+        .modal-bg.open { opacity: 1; pointer-events: auto; }
+        .modal { width: min(520px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 26px 26px 22px; background: var(--glass-2); transform: translateY(20px) scale(0.97); transition: transform 0.35s cubic-bezier(.2,1.2,.4,1); }
+        .modal-bg.open .modal { transform: none; }
+        .modal h2 { margin: 0 0 4px; font-size: 1.3rem; }
+        .modal .sub { color: var(--muted); font-size: 0.86rem; margin-bottom: 20px; }
+        .modal form { display: grid; gap: 16px; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .hint { font-size: 0.74rem; color: var(--muted); line-height: 1.4; }
+        .role-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .role-pick label { cursor: pointer; padding: 12px 10px; border-radius: 13px; border: 1px solid var(--line-2); background: rgba(4,9,22,0.5); text-align: center; font-size: 0.84rem; font-weight: 600; color: var(--ink-2); transition: all 0.2s; }
+        .role-pick label i { display: block; width: 10px; height: 10px; border-radius: 50%; margin: 0 auto 7px; background: var(--c); box-shadow: 0 0 10px var(--c); }
+        .role-pick input { position: absolute; opacity: 0; pointer-events: none; }
+        .role-pick input:checked + label { border-color: var(--c); color: var(--ink); background: color-mix(in srgb, var(--c) 14%, rgba(4,9,22,0.5)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 20%, transparent); }
+        .role-pick input:focus-visible + label { outline: 2px solid var(--cyan); outline-offset: 2px; }
+        .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
+        .secret { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-radius: 13px; background: rgba(4,9,22,0.7); border: 1px dashed rgba(56,189,248,0.5); font-family: var(--mono); font-size: 1.15rem; letter-spacing: 0.04em; margin: 16px 0; }
+        .secret span { flex: 1; word-break: break-all; }
+
+        /* Toasts */
+        .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 90; display: grid; gap: 10px; width: min(360px, calc(100vw - 32px)); }
+        .toast { padding: 13px 16px; border-radius: 14px; font-size: 0.86rem; background: rgba(8,14,30,0.94); border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); box-shadow: 0 20px 50px -20px rgba(0,0,0,0.9), 0 0 30px -14px var(--c); animation: toastIn 0.45s cubic-bezier(.2,1.2,.4,1) both; }
+        .toast.out { animation: toastOut 0.35s ease forwards; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(40px); } }
+        @keyframes toastOut { to { opacity: 0; transform: translateX(40px); } }
+
+        @media (max-width: 980px) {
+            .roles { grid-template-columns: 1fr; }
+            .kpis { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 640px) {
+            .shell { padding: 16px 16px 48px; }
+            .kpis { grid-template-columns: 1fr 1fr; }
+            .grid2, .role-pick { grid-template-columns: 1fr; }
+            .hide-sm { display: none; }
+        }
+{% endblock %}
+
+{% block content %}
+<div class="shell">
+    <header class="glass topbar">
+        <a class="chip" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>Panel</a>
+        <div>
+            <h1>Usuarios y roles</h1>
+            <div class="sub">Controla quién accede a SIDFAM y qué puede ver</div>
+        </div>
+        <div class="grow"></div>
+        <span class="chip">{{ user.display_name }} <span class="role-badge r-{{ user.role }}">{{ user.role_label }}</span></span>
+        <form method="post" action="/logout"><button class="chip" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Salir</button></form>
+    </header>
+
+    <div class="kpis">
+        <div class="glass kpi" style="--i:0;--c:var(--ink-2)"><div class="k"><i></i>Total</div><div class="v" id="k-total">—</div></div>
+        <div class="glass kpi" style="--i:1;--c:var(--violeta)"><div class="k"><i></i>Administradores</div><div class="v" id="k-administrador">—</div></div>
+        <div class="glass kpi" style="--i:2;--c:var(--cyan)"><div class="k"><i></i>Supervisores</div><div class="v" id="k-supervisor">—</div></div>
+        <div class="glass kpi" style="--i:3;--c:var(--verde)"><div class="k"><i></i>Conductores</div><div class="v" id="k-conductor">—</div></div>
+        <div class="glass kpi" style="--i:4;--c:var(--gris)"><div class="k"><i></i>Inactivos</div><div class="v" id="k-inactive">—</div></div>
+    </div>
+
+    <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Roles y permisos
+    </div>
+    <div class="roles">
+        {% set icons = {
+            "administrador": '<path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 14.4l-4.8 2.5.9-5.4L4.2 7.7l5.4-.8z"/>',
+            "supervisor": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+            "conductor": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6.5M4.5 15.5l5.3-2.3M19.5 15.5l-5.3-2.3"/>',
+        } %}
+        {% for key, r in roles.items() %}
+        <article class="glass role r-{{ key }}" style="--i:{{ loop.index0 }}">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{{ icons[key] | safe }}</svg></div>
+            <h3>{{ r.label }} <small>{{ key }}</small></h3>
+            <p>{{ r.descripcion }}</p>
+            <ul class="perms">
+                {% for p, desc in permisos.items() %}
+                {% set on = p in r.permisos %}
+                <li class="{{ 'on' if on else 'off' }}">
+                    {% if on %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                    {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>{% endif %}
+                    {{ desc }}
+                </li>
+                {% endfor %}
+            </ul>
+        </article>
+        {% endfor %}
+    </div>
+
+    <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M17 11l2 2 4-4"/></svg>
+        Cuentas
+    </div>
+    <section class="glass panel">
+        <div class="tools">
+            <div class="input-wrap search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <input class="input" id="q" placeholder="Buscar por nombre, usuario o sesión…" autocomplete="off">
+            </div>
+            <div class="seg" id="role-filter">
+                <button class="active" data-r="all">Todos</button>
+                <button data-r="administrador">Admin</button>
+                <button data-r="supervisor">Supervisor</button>
+                <button data-r="conductor">Conductor</button>
+            </div>
+            <button class="btn btn-primary" id="new-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nuevo usuario</button>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Usuario</th><th>Rol</th><th>Sesión</th><th>Estado</th><th class="hide-sm">Último acceso</th><th></th></tr></thead>
+                <tbody id="rows"><tr><td colspan="6" class="empty">Cargando…</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<!-- Crear / editar -->
+<div class="modal-bg" id="edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+    <div class="glass modal">
+        <h2 id="edit-title">Nuevo usuario</h2>
+        <div class="sub" id="edit-sub">Se le pedirá cambiar la contraseña en su primer acceso.</div>
+        <form id="edit-form" autocomplete="off">
+            <div class="grid2">
+                <div class="field">
+                    <label for="f-username">Usuario</label>
+                    <input class="input" id="f-username" required pattern="[a-z0-9._\-]{3,32}" placeholder="p. ej. laura.o" autocapitalize="none" spellcheck="false">
+                </div>
+                <div class="field">
+                    <label for="f-name">Nombre completo</label>
+                    <input class="input" id="f-name" placeholder="Opcional">
+                </div>
+            </div>
+            <div class="field">
+                <label>Rol</label>
+                <div class="role-pick">
+                    {% for key, r in roles.items() %}
+                    <input type="radio" name="role" id="role-{{ key }}" value="{{ key }}" {% if key == 'conductor' %}checked{% endif %}>
+                    <label for="role-{{ key }}" class="r-{{ key }}"><i></i>{{ r.label }}</label>
+                    {% endfor %}
+                </div>
+                <div class="hint" id="role-hint"></div>
+            </div>
+            <div class="field">
+                <label for="f-session">Sesión asignada <span id="session-req" class="muted">(obligatoria para conductores)</span></label>
+                <input class="input mono" id="f-session" placeholder="session_id de sus dispositivos, p. ej. laura_01" spellcheck="false" list="sessions-list">
+                <datalist id="sessions-list"></datalist>
+                <div class="hint">Es el <code>SESSION_ID</code> configurado en los ESP32 del conductor. Supervisores y administradores ven todas las sesiones.</div>
+            </div>
+            <div class="field" id="pw-field">
+                <label for="f-password">Contraseña inicial</label>
+                <div class="input-wrap">
+                    <input class="input" id="f-password" type="password" minlength="{{ min_password }}" autocomplete="new-password" placeholder="Vacía = generar una temporal segura">
+                    <button type="button" class="eye-btn" data-toggle-pw="f-password" aria-label="Mostrar contraseña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M3 3l18 18"/></svg></button>
+                </div>
+            </div>
+            <div class="alert" id="edit-error" hidden></div>
+            <div class="actions">
+                <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+                <button type="submit" class="btn btn-primary" id="edit-submit">Crear usuario</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Contraseña temporal -->
+<div class="modal-bg" id="secret-modal" role="dialog" aria-modal="true" aria-labelledby="secret-title">
+    <div class="glass modal">
+        <h2 id="secret-title">Contraseña temporal</h2>
+        <div class="sub" id="secret-sub"></div>
+        <div class="secret"><span id="secret-value"></span><button class="icon-btn" id="copy-btn" title="Copiar" aria-label="Copiar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></div>
+        <div class="alert info"><span>Solo se muestra esta vez. Entrégala por un canal seguro: al entrar, el usuario deberá elegir su propia contraseña.</span></div>
+        <div class="actions"><button class="btn btn-primary" data-close>Entendido</button></div>
+    </div>
+</div>
+
+<!-- Confirmación -->
+<div class="modal-bg" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="glass modal">
+        <h2 id="confirm-title"></h2>
+        <div class="sub" id="confirm-text"></div>
+        <div class="actions"><button class="btn btn-ghost" data-close>Cancelar</button><button class="btn btn-danger" id="confirm-ok">Confirmar</button></div>
+    </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+    const ME = {{ user.id }};
+    const ROLES = {{ roles | tojson }};
+    const COLORS = { administrador: "var(--violeta)", supervisor: "var(--cyan)", conductor: "var(--verde)" };
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    let users = [], roleFilter = "all", editing = null;
+
+    async function api(url, opts = {}) {
+        const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
+        if (r.status === 401) { location.href = "/login?next=/usuarios"; throw new Error("Sesión expirada"); }
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            const d = data.detail;
+            throw new Error(Array.isArray(d) ? d.map(x => x.msg).join(", ") : (d || "Error " + r.status));
+        }
+        return data;
+    }
+
+    function toast(msg, ok = true) {
+        const el = document.createElement("div");
+        el.className = "toast"; el.style.setProperty("--c", ok ? "var(--verde)" : "var(--rojo)");
+        el.textContent = msg; $("toasts").appendChild(el);
+        setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 350); }, 4000);
+    }
+
+    function relTime(ts) {
+        if (!ts) return '<span class="muted">Nunca</span>';
+        const d = new Date(ts); if (isNaN(d)) return esc(ts);
+        const s = Math.round((Date.now() - d) / 1000);
+        const rel = s < 60 ? "hace un momento" : s < 3600 ? `hace ${Math.round(s / 60)} min` : s < 86400 ? `hace ${Math.round(s / 3600)} h` : `hace ${Math.round(s / 86400)} d`;
+        return `<span title="${esc(d.toLocaleString("es-CO"))}">${rel}</span>`;
+    }
+    const initials = (u) => (u.full_name || u.username).split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("");
+
+    const ICON = {
+        edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+        key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M21 2l-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>',
+        off: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/></svg>',
+        on: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
+    };
+
+    function render() {
+        const q = $("q").value.trim().toLowerCase();
+        const list = users.filter(u => (roleFilter === "all" || u.role === roleFilter) &&
+            (!q || [u.username, u.full_name, u.session_id].some(v => (v || "").toLowerCase().includes(q))));
+        $("rows").innerHTML = list.length ? list.map((u, i) => `
+            <tr class="${u.active ? "" : "inactive"}" style="--i:${Math.min(i, 15)}">
+                <td><div class="person"><div class="avatar" style="--c:${COLORS[u.role] || "var(--gris)"}">${esc(initials(u))}</div>
+                    <div><b>${esc(u.full_name || u.username)}${u.id === ME ? '<span class="you">TÚ</span>' : ""}</b><span>@${esc(u.username)}</span></div></div></td>
+                <td><span class="role-badge r-${esc(u.role)}">${esc(u.role_label)}</span></td>
+                <td>${u.session_id ? `<span class="mono">${esc(u.session_id)}</span>` : '<span class="muted">Todas</span>'}</td>
+                <td><span class="status ${u.active ? "" : "off"}">${u.active ? "Activo" : "Inactivo"}</span>${u.must_change_password ? '<span class="tag-temp" title="Debe cambiar la contraseña al entrar">clave temporal</span>' : ""}</td>
+                <td class="hide-sm">${relTime(u.last_login)}</td>
+                <td><div class="row-actions">
+                    <button class="icon-btn" title="Editar" aria-label="Editar" data-act="edit" data-id="${u.id}">${ICON.edit}</button>
+                    <button class="icon-btn" title="Restablecer contraseña" aria-label="Restablecer contraseña" data-act="reset" data-id="${u.id}">${ICON.key}</button>
+                    <button class="icon-btn ${u.active ? "danger" : "good"}" title="${u.active ? "Desactivar" : "Activar"}" aria-label="${u.active ? "Desactivar" : "Activar"}" data-act="toggle" data-id="${u.id}" ${u.id === ME ? "disabled" : ""}>${u.active ? ICON.off : ICON.on}</button>
+                </div></td>
+            </tr>`).join("") : `<tr><td colspan="6" class="empty">${users.length ? "Ningún usuario coincide con la búsqueda." : "Aún no hay usuarios."}</td></tr>`;
+
+        $("k-total").textContent = users.length;
+        ["administrador", "supervisor", "conductor"].forEach(r => $("k-" + r).textContent = users.filter(u => u.role === r && u.active).length);
+        $("k-inactive").textContent = users.filter(u => !u.active).length;
+    }
+
+    async function load() {
+        try { users = (await api("/api/usuarios")).usuarios; render(); }
+        catch (e) { $("rows").innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`; }
+        // sugerencias de sesión a partir de las que ya tienen lecturas
+        fetch("/sesiones").then(r => r.json()).then(d => {
+            $("sessions-list").innerHTML = (d.sesiones || []).map(s => `<option value="${esc(s.session_id)}">${s.lecturas} lecturas</option>`).join("");
+        }).catch(() => {});
+    }
+
+    // ---------- Modales ----------
+    function open(id) { $(id).classList.add("open"); setTimeout(() => $(id).querySelector("input:not([disabled]):not([type=radio]), button.btn-primary, .btn-danger")?.focus(), 60); }
+    function close(id) { $(id).classList.remove("open"); }
+    document.querySelectorAll(".modal-bg").forEach(m => {
+        m.addEventListener("click", (e) => { if (e.target === m || e.target.closest("[data-close]")) close(m.id); });
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".modal-bg.open").forEach(m => close(m.id)); });
+
+    function syncRole() {
+        const role = document.querySelector("input[name=role]:checked").value;
+        $("role-hint").textContent = ROLES[role].descripcion;
+        $("f-session").required = role === "conductor";
+        $("session-req").textContent = role === "conductor" ? "(obligatoria)" : "(opcional)";
+    }
+    document.querySelectorAll("input[name=role]").forEach(r => r.addEventListener("change", syncRole));
+
+    function openEdit(u) {
+        editing = u || null;
+        $("edit-error").hidden = true;
+        $("edit-title").textContent = u ? "Editar usuario" : "Nuevo usuario";
+        $("edit-sub").textContent = u ? `@${u.username} · cambiar el rol o la sesión cierra sus sesiones abiertas.` : "Se le pedirá cambiar la contraseña en su primer acceso.";
+        $("edit-submit").textContent = u ? "Guardar cambios" : "Crear usuario";
+        $("f-username").value = u ? u.username : ""; $("f-username").disabled = !!u;
+        $("f-name").value = u ? (u.full_name || "") : "";
+        $("f-session").value = u ? (u.session_id || "") : "";
+        $("f-password").value = ""; $("pw-field").hidden = !!u;
+        document.getElementById("role-" + (u ? u.role : "conductor")).checked = true;
+        // no se puede cambiar el rol propio
+        document.querySelectorAll("input[name=role]").forEach(r => r.disabled = !!u && u.id === ME && r.value !== u.role);
+        syncRole();
+        open("edit-modal");
+    }
+
+    $("edit-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const btn = $("edit-submit"), label = btn.textContent;
+        const body = {
+            full_name: $("f-name").value.trim(),
+            role: document.querySelector("input[name=role]:checked").value,
+            session_id: $("f-session").value.trim(),
+        };
+        btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        try {
+            if (editing) {
+                await api(`/api/usuarios/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) });
+                close("edit-modal"); toast("Cambios guardados");
+            } else {
+                body.username = $("f-username").value.trim().toLowerCase();
+                body.password = $("f-password").value || null;
+                const r = await api("/api/usuarios", { method: "POST", body: JSON.stringify(body) });
+                close("edit-modal"); toast(`Usuario @${r.usuario.username} creado`);
+                if (r.password_temporal) showSecret(r.usuario, r.password_temporal);
+            }
+            await load();
+        } catch (err) {
+            $("edit-error").hidden = false; $("edit-error").textContent = err.message;
+            $("edit-error").style.animation = "none"; void $("edit-error").offsetWidth; $("edit-error").style.animation = "";
+        } finally { btn.disabled = false; btn.textContent = label; }
+    });
+
+    function showSecret(u, pw) {
+        $("secret-sub").textContent = `Para @${u.username}${u.full_name ? " (" + u.full_name + ")" : ""}`;
+        $("secret-value").textContent = pw;
+        open("secret-modal");
+    }
+    $("copy-btn").addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText($("secret-value").textContent); toast("Copiada al portapapeles"); }
+        catch { toast("No se pudo copiar; selecciónala a mano", false); }
+    });
+
+    let confirmAction = null;
+    function confirmDo(title, text, okLabel, fn) {
+        $("confirm-title").textContent = title; $("confirm-text").textContent = text;
+        $("confirm-ok").textContent = okLabel; confirmAction = fn; open("confirm-modal");
+    }
+    $("confirm-ok").addEventListener("click", async () => {
+        close("confirm-modal");
+        try { await confirmAction(); } catch (err) { toast(err.message, false); }
+    });
+
+    $("rows").addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-act]"); if (!b || b.disabled) return;
+        const u = users.find(x => x.id === Number(b.dataset.id)); if (!u) return;
+        if (b.dataset.act === "edit") openEdit(u);
+        if (b.dataset.act === "reset") confirmDo("Restablecer contraseña",
+            `Se generará una contraseña temporal para @${u.username} y se cerrarán sus sesiones abiertas.`, "Restablecer",
+            async () => { const r = await api(`/api/usuarios/${u.id}/clave`, { method: "POST", body: "{}" }); showSecret(u, r.password_temporal); load(); });
+        if (b.dataset.act === "toggle") {
+            const act = !u.active;
+            const run = async () => { await api(`/api/usuarios/${u.id}`, { method: "PATCH", body: JSON.stringify({ active: act }) }); toast(act ? `@${u.username} activado` : `@${u.username} desactivado`); load(); };
+            if (act) run().catch(err => toast(err.message, false));
+            else confirmDo("Desactivar usuario", `@${u.username} no podrá entrar y se cerrarán sus sesiones abiertas. Podrás reactivarlo después.`, "Desactivar", run);
+        }
+    });
+
+    $("new-btn").addEventListener("click", () => openEdit(null));
+    $("q").addEventListener("input", render);
+    document.querySelectorAll("#role-filter button").forEach(b => b.addEventListener("click", () => {
+        document.querySelectorAll("#role-filter button").forEach(x => x.classList.toggle("active", x === b));
+        roleFilter = b.dataset.r; render();
+    }));
+
+    load();
+})();
+</script>
+{% endblock %}

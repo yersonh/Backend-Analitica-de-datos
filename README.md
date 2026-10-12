@@ -36,17 +36,47 @@ usa la IP local de tu computador (ej. `192.168.1.100`) en vez de
 `localhost` al correr uvicorn con `--host 0.0.0.0`, y configura esa
 misma IP en `SERVER_HOST` dentro del firmware.
 
+### Acceso: login y roles
+
+El panel exige iniciar sesión. Al arrancar por primera vez (tabla `users`
+vacía) se crea el usuario **`admin`** con una **contraseña temporal que se
+imprime en la consola** de uvicorn; al entrar se pide cambiarla. Desde el
+menú de usuario → *Usuarios y roles* (`/usuarios`) el administrador crea
+las demás cuentas.
+
+| Rol | Qué puede hacer |
+|---|---|
+| **Administrador** | Todo lo del supervisor + gestionar usuarios (crear, cambiar rol/sesión, desactivar, restablecer contraseña) |
+| **Supervisor** | Ver todas las sesiones en vivo, el historial y la analítica; exportar CSV; registrar KSS |
+| **Conductor** | Ver **solo su sesión asignada** (el `SESSION_ID` de sus ESP32) en vivo y su historial; registrar su KSS |
+
+Los permisos y roles están definidos en `app/auth.py` (`PERMISOS`, `ROLES`).
+Contraseñas con PBKDF2-SHA256, cookie de sesión firmada (HttpOnly,
+SameSite=Lax, 12 h), bloqueo de 5 min tras 5 intentos fallidos. Cambiar la
+contraseña, el rol o desactivar una cuenta cierra sus sesiones abiertas.
+
+Los ESP32 no hacen login: se autentican con la cabecera `X-Device-Key`.
+
+Variables de entorno (en Railway, en *Variables* del servicio):
+
+| Variable | Para qué |
+|---|---|
+| `SECRET_KEY` | Firma las cookies. **Obligatoria en producción**; sin ella las sesiones se cierran en cada reinicio. Genera una con `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `DEVICE_API_KEY` | Clave que deben enviar los ESP32 en `X-Device-Key`. Si no se define, `/frame` y `/pulso` aceptan datos de cualquiera (solo para desarrollo local). Pon el mismo valor en `DEVICE_API_KEY` de los dos `.ino` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Opcional: credenciales del primer administrador en lugar de la contraseña temporal generada |
+
 ## 3. Probar sin hardware (mientras el prototipo físico se arma)
 
 ```bash
-# Simular una lectura de pulso
+# Simular una lectura de pulso (añade -H "X-Device-Key: <clave>" si DEVICE_API_KEY está definida)
 curl -X POST http://localhost:8000/pulso -F "bpm=72" -F "session_id=default"
 
 # Simular un frame (con cualquier imagen con un rostro)
 curl -X POST http://localhost:8000/frame -F "file=@ruta/a/una/foto.jpg" -F "session_id=default"
 
-# Ver el historial de eventos
-curl http://localhost:8000/eventos?session_id=default
+# Ver el historial de eventos (requiere sesión iniciada: guarda la cookie del login)
+curl -c cookies.txt -X POST http://localhost:8000/login -d "username=admin&password=<tu-clave>"
+curl -b cookies.txt "http://localhost:8000/eventos?session_id=default"
 ```
 
 ## 4. Estructura del proyecto
@@ -54,13 +84,16 @@ curl http://localhost:8000/eventos?session_id=default
 ```
 sidfam-backend/
 ├── app/
-│   ├── main.py          # Endpoints FastAPI (/frame, /pulso, /eventos, /)
+│   ├── main.py          # Endpoints FastAPI (/frame, /pulso, /eventos, /, login, usuarios)
+│   ├── auth.py           # Login, roles, permisos y clave de dispositivo
 │   ├── vision.py         # MediaPipe Face Mesh: EAR, MAR, inclinación de cabeza
 │   ├── pulse.py           # Buffer y análisis de BPM/variabilidad
 │   ├── fusion.py          # Lógica de fusión multimodal + nivel de riesgo
-│   ├── database.py        # Persistencia en SQLite
+│   ├── database.py        # Persistencia (PostgreSQL o SQLite)
 │   └── templates/
-│       └── dashboard.html # Dashboard HTML (historial + frecuencia)
+│       ├── dashboard.html # Panel en vivo + historial + analítica
+│       ├── login.html, cambiar_clave.html, acceso.html, usuarios.html
+│       └── _base.html     # Base visual de las páginas de acceso
 ├── firmware/
 │   ├── esp32cam_frame_sender/    # .ino de ejemplo para el ESP32-CAM
 │   └── esp32_pulse_sender/        # .ino de ejemplo para el ESP32 + sensor de pulso

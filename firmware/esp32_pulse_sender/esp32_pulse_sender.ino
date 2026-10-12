@@ -25,6 +25,9 @@ const char* WIFI_SSID     = "TU_RED_WIFI";
 const char* WIFI_PASSWORD = "TU_PASSWORD";
 const char* SERVER_HOST   = "http://192.168.1.100:8000";  // IP del backend en la red local
 const char* SESSION_ID    = "default";
+// Clave del dispositivo: el mismo valor que DEVICE_API_KEY en el backend.
+// Vacía ("") si el backend no la exige (desarrollo local).
+const char* DEVICE_API_KEY = "";
 
 const unsigned long PULSE_SEND_INTERVAL_MS = 2000;  // cada 2s (ajustable)
 
@@ -87,6 +90,9 @@ void sendPulseReading(float bpm) {
   String url = String(SERVER_HOST) + "/pulso";
   http.begin(url);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  if (strlen(DEVICE_API_KEY) > 0) {
+    http.addHeader("X-Device-Key", DEVICE_API_KEY);
+  }
 
   String body = "bpm=" + String(bpm, 1) + "&session_id=" + String(SESSION_ID);
   int httpCode = http.POST(body);

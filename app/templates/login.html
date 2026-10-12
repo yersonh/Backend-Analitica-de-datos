@@ -1,0 +1,155 @@
+{% extends "_base.html" %}
+{% block title %}SIDFAM — Iniciar sesión{% endblock %}
+
+{% block styles %}
+        .login {
+            min-height: 100vh; display: grid; grid-template-columns: 1.1fr minmax(360px, 440px);
+            gap: 48px; align-items: center; max-width: 1180px; margin: 0 auto; padding: 40px 24px;
+        }
+        /* --- Lado de marca --- */
+        .brand { animation: fadeUp 0.8s both; }
+        .brand .logo-row { display: flex; align-items: center; gap: 14px; }
+        .brand .logo-row b {
+            font-size: 1.5rem; letter-spacing: 0.32em;
+            background: linear-gradient(90deg, #fff, var(--cyan), var(--violeta));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .brand h1 {
+            font-size: clamp(2.4rem, 5vw, 3.9rem); line-height: 1.04; letter-spacing: -0.02em; margin: 34px 0 16px;
+            background: linear-gradient(120deg, #fff 0%, #bae6fd 45%, var(--violeta));
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .brand p { color: var(--ink-2); font-size: 1.05rem; line-height: 1.6; max-width: 46ch; margin: 0; }
+        .features { display: grid; gap: 12px; margin-top: 32px; max-width: 460px; }
+        .feature {
+            display: flex; gap: 14px; align-items: center; padding: 13px 16px; border-radius: 16px;
+            background: rgba(5, 10, 24, 0.45); border: 1px solid var(--line);
+            animation: fadeUp 0.7s both; animation-delay: calc(0.25s + var(--i) * 0.12s);
+        }
+        .feature .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+        .feature .ico svg { width: 20px; height: 20px; }
+        .feature b { display: block; font-size: 0.92rem; }
+        .feature span { font-size: 0.8rem; color: var(--muted); }
+
+        /* Ojo escáner animado */
+        .scan { width: 58px; height: 58px; }
+        .scan .ring { transform-origin: 29px 29px; animation: spin 9s linear infinite; }
+        .scan .lid { transform-origin: 29px 29px; animation: blink 5s infinite; }
+        @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.08); } }
+
+        /* --- Tarjeta del formulario --- */
+        .card { padding: 34px 32px 30px; animation: fadeUp 0.8s 0.15s both; }
+        .card h2 { margin: 0; font-size: 1.55rem; letter-spacing: -0.01em; }
+        .card .sub { color: var(--muted); font-size: 0.9rem; margin: 6px 0 24px; }
+        .card form { display: grid; gap: 18px; }
+        .caps { font-size: 0.74rem; color: var(--ambar); display: none; margin-top: 2px; }
+        .caps.on { display: block; }
+        .card .btn-primary { width: 100%; padding: 14px; font-size: 1rem; margin-top: 4px; }
+        .card .foot { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+        .card .foot b { color: var(--ink-2); font-weight: 500; }
+        .roles { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+        @media (max-width: 900px) {
+            .login { grid-template-columns: 1fr; gap: 28px; padding: 28px 16px; }
+            .brand h1 { font-size: 2.2rem; margin: 22px 0 10px; }
+            .features { display: none; }
+            .card { padding: 26px 20px; }
+        }
+{% endblock %}
+
+{% block content %}
+<main class="login">
+    <section class="brand" aria-hidden="false">
+        <div class="logo-row">
+            <svg class="scan" viewBox="0 0 58 58" aria-hidden="true">
+                <defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>
+                <g class="ring"><circle cx="29" cy="29" r="27" fill="none" stroke="url(#lg)" stroke-width="1.5" stroke-dasharray="3 7"/></g>
+                <g class="lid">
+                    <path d="M8 29 C17 16 41 16 50 29 C41 42 17 42 8 29Z" fill="rgba(3,7,18,0.6)" stroke="url(#lg)" stroke-width="2.6"/>
+                    <circle cx="29" cy="29" r="7.5" fill="url(#lg)"/><circle cx="29" cy="29" r="3" fill="#030712"/><circle cx="31.5" cy="26.5" r="1.8" fill="#fff"/>
+                </g>
+            </svg>
+            <b>SIDFAM</b>
+        </div>
+        <h1>Cada parpadeo<br>cuenta.</h1>
+        <p>Sistema inteligente de detección de fatiga: visión por computador y ritmo cardíaco fusionados en tiempo real para cuidar a quien conduce.</p>
+        <div class="features">
+            <div class="feature" style="--i:0; --c: var(--cyan)">
+                <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+                <div><b>Visión</b><span>Cierre de ojos, bostezos e inclinación de cabeza</span></div>
+            </div>
+            <div class="feature" style="--i:1; --c: var(--rojo)">
+                <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+                <div><b>Pulso</b><span>Caída frente a tu basal y baja variabilidad</span></div>
+            </div>
+            <div class="feature" style="--i:2; --c: var(--violeta)">
+                <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="12" r="2"/><path d="M7 6c6 0 6 6 10 6M7 18c6 0 6-6 10-6"/></svg></div>
+                <div><b>Fusión</b><span>Alerta solo con evidencia en ambos canales</span></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="glass card" aria-labelledby="t">
+        <h2 id="t">Iniciar sesión</h2>
+        <div class="sub">Accede al panel con tu cuenta asignada.</div>
+        <form method="post" action="/login" id="login-form" novalidate>
+            <input type="hidden" name="next" value="{{ next }}">
+            {% if error %}
+            <div class="alert" role="alert">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>{{ error }}</span>
+            </div>
+            {% endif %}
+            <div class="field">
+                <label for="username">Usuario</label>
+                <div class="input-wrap">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+                    <input class="input" id="username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required {% if not username %}autofocus{% endif %}>
+                </div>
+            </div>
+            <div class="field">
+                <label for="password">Contraseña</label>
+                <div class="input-wrap">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                    <input class="input" id="password" name="password" type="password" autocomplete="current-password" required {% if username %}autofocus{% endif %}>
+                    <button type="button" class="eye-btn" data-toggle-pw="password" aria-label="Mostrar contraseña">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M3 3l18 18"/></svg>
+                    </button>
+                </div>
+                <div class="caps" id="caps">Bloq Mayús está activado</div>
+            </div>
+            <button class="btn btn-primary" type="submit" id="submit">
+                <span>Entrar</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+        </form>
+        <div class="foot">
+            ¿No tienes cuenta o olvidaste tu contraseña? <b>Pide a un administrador</b> que te cree una o te la restablezca.
+            <div class="roles">
+                <span class="role-badge r-administrador">Administrador</span>
+                <span class="role-badge r-supervisor">Supervisor</span>
+                <span class="role-badge r-conductor">Conductor</span>
+            </div>
+        </div>
+    </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (() => {
+        const form = document.getElementById("login-form");
+        const pw = document.getElementById("password");
+        pw.addEventListener("keyup", (e) => document.getElementById("caps").classList.toggle("on", e.getModifierState && e.getModifierState("CapsLock")));
+        // al volver con "atrás" el navegador restaura la página tal cual: rehabilita el botón
+        addEventListener("pageshow", () => { const b = document.getElementById("submit"); b.disabled = false; b.innerHTML = b.dataset.html || b.innerHTML; });
+        document.getElementById("submit").dataset.html = document.getElementById("submit").innerHTML;
+        form.addEventListener("submit", (e) => {
+            if (!form.username.value.trim() || !pw.value) { e.preventDefault(); (form.username.value.trim() ? pw : form.username).focus(); return; }
+            const b = document.getElementById("submit");
+            b.disabled = true;
+            b.innerHTML = '<span class="spinner"></span><span>Verificando…</span>';
+        });
+    })();
+</script>
+{% endblock %}

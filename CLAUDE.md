@@ -28,12 +28,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - Use `--host 0.0.0.0` and the machine's LAN IP so the ESP32s can reach it; set
   the same IP in `SERVER_HOST` in the firmware sketches.
 
-There is no test suite, linter, or build step. Exercise endpoints manually:
+There is no test suite, linter, or build step. Exercise endpoints manually
+(read endpoints need a login cookie; ingest needs `X-Device-Key` when
+`DEVICE_API_KEY` is set):
 
 ```bash
 curl -X POST http://localhost:8000/pulso -F "bpm=72" -F "session_id=default"
 curl -X POST http://localhost:8000/frame -F "file=@foto.jpg" -F "session_id=default"
-curl "http://localhost:8000/eventos?session_id=default"
+curl -c c.txt -X POST http://localhost:8000/login -d "username=admin&password=..."
+curl -b c.txt "http://localhost:8000/eventos?session_id=default"
 ```
 
 `mediapipe` is pinned to `0.10.13` on purpose: 0.10.18+ removed the classic
@@ -108,6 +111,21 @@ backend-agnostic. `_ph()` swaps `?`→`%s` for the Postgres branch; Postgres use
 `CREATE TABLE IF NOT EXISTS` — no migrations. On Railway the SQLite file is
 ephemeral (and `.dockerignore`d); Postgres is what survives deploys.
 
+**`app/auth.py`** — access control, stdlib only (PBKDF2 hashes, HMAC-signed
+cookie `sidfam_sesion` carrying user id + `session_version` + expiry; bumping
+`users.session_version` revokes every open login). Roles are sets of
+permission strings in `ROLES` (`administrador` ⊃ `supervisor` ⊃ `conductor`);
+**endpoints depend on permissions, never on role names**: use
+`Depends(require("<permiso>"))`. A `conductor` is bound to `users.session_id`;
+always pass a requested `session_id` through `auth.resolve_session(user, ...)`
+(403 on someone else's session). Auth failures raise `LoginRequired` /
+`PasswordChangeRequired` / `Forbidden`, which `main.py` turns into a redirect
+for HTML GETs and JSON 401/403 otherwise. `/frame` and `/pulso` use
+`require_device` (header `X-Device-Key` = env `DEVICE_API_KEY`; open when unset).
+First boot with an empty `users` table creates `admin` with a temporary
+password printed to the uvicorn log. Env: `SECRET_KEY`, `DEVICE_API_KEY`,
+`ADMIN_USERNAME`/`ADMIN_PASSWORD`. Login lockout state is in memory.
+
 **Sessions**: `session_id` (default `"default"`) is the multi-user seam — it keys
 the pulse buffers, fusion state, and every DB query. The prototype runs one
 session; keep new code session-scoped.
@@ -121,5 +139,5 @@ hardware and are the main thing that will change during testing.
 `firmware/esp32cam_frame_sender` POSTs `multipart/form-data` to `/frame` every
 ~1.5s with fields `session_id` and `file` (JPEG). `firmware/esp32_pulse_sender`
 POSTs `application/x-www-form-urlencoded` `bpm` + `session_id` to `/pulso` every
-~2s. If you change endpoint paths, field names, or form vs. JSON
+~2s. Both send `X-Device-Key` when their `DEVICE_API_KEY` constant is non-empty. If you change endpoint paths, field names, or form vs. JSON
 encoding in `app/main.py`, update the matching `.ino` sketch.

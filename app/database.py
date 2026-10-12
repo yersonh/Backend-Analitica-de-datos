@@ -13,7 +13,7 @@ Soporta DOS motores según el entorno, sin que el resto de la app se entere:
 Las firmas de las funciones públicas (init_db, save_event, list_events,
 event_counts_by_risk, increment_normal_reading, normal_reading_count,
 save_reading, list_readings, save_self_report, list_self_reports,
-list_sessions) son idénticas en ambos casos: app/main.py no necesita cambiar.
+list_sessions y las de usuarios) son idénticas en ambos casos: app/main.py no necesita cambiar.
 
 Tablas:
   - fatigue_events   -> UNA fila por episodio de fatiga (o advertencia de sensor).
@@ -25,6 +25,7 @@ Tablas:
   - self_reports     -> autoreporte de somnolencia con la escala KSS
                         (Karolinska Sleepiness Scale, 1-9). Es la etiqueta
                         "real" (ground truth) para evaluar los modelos.
+  - users            -> cuentas de acceso al panel con su rol (ver app/auth.py).
 
 Es un proyecto de curso con tráfico bajo, así que se abre/cierra una
 conexión por operación (patrón contextmanager) en vez de un pool.
@@ -101,6 +102,19 @@ CREATE TABLE IF NOT EXISTS self_reports (
     kss INTEGER NOT NULL CHECK (kss BETWEEN 1 AND 9),
     note TEXT
 );
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    full_name TEXT,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    session_id TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    session_version INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    last_login TEXT
+);
 """
 
 _SCHEMA_POSTGRES = """
@@ -150,6 +164,19 @@ CREATE TABLE IF NOT EXISTS self_reports (
     timestamp TIMESTAMP NOT NULL,
     kss INTEGER NOT NULL CHECK (kss BETWEEN 1 AND 9),
     note TEXT
+);
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    full_name TEXT,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    session_id TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    session_version INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    last_login TIMESTAMP
 );
 """
 
@@ -439,3 +466,104 @@ def list_self_reports(session_id: str | None = None) -> list[dict]:
         cur = conn.cursor()
         cur.execute(_ph(sql), tuple(params))
         return _iso_rows(cur.fetchall())
+
+
+# ---------------------------------------------------------------------------
+# Usuarios del panel (control de acceso, ver app/auth.py)
+# ---------------------------------------------------------------------------
+
+# Columnas que update_user() acepta; el resto (id, created_at...) no se toca.
+_USER_UPDATABLE = ("full_name", "password_hash", "role", "session_id", "active",
+                   "must_change_password", "session_version")
+
+
+def _user_row(row) -> dict | None:
+    if row is None:
+        return None
+    u = dict(row)
+    for k in ("created_at", "last_login"):
+        if isinstance(u.get(k), datetime):
+            u[k] = u[k].isoformat(timespec="seconds")
+    for k in ("active", "must_change_password"):
+        u[k] = bool(u[k])
+    return u
+
+
+def count_users(role: str | None = None, only_active: bool = False) -> int:
+    sql = "SELECT COUNT(*) AS total FROM users WHERE 1 = 1"
+    params: list = []
+    if role:
+        sql += " AND role = ?"
+        params.append(role)
+    if only_active:
+        sql += " AND active = 1"
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph(sql), tuple(params))
+        return int(cur.fetchone()["total"])
+
+
+def create_user(username: str, password_hash: str, role: str, full_name: str | None = None,
+                session_id: str | None = None, must_change_password: bool = False) -> int:
+    now = datetime.now()
+    values = (username, full_name, password_hash, role, session_id, int(must_change_password),
+              now if USE_POSTGRES else now.isoformat(timespec="seconds"))
+    sql = """
+        INSERT INTO users (username, full_name, password_hash, role, session_id,
+                           must_change_password, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if USE_POSTGRES:
+            cur.execute(_ph(sql + " RETURNING id"), values)
+            new_id = cur.fetchone()["id"]
+        else:
+            cur.execute(sql, values)
+            new_id = cur.lastrowid
+        conn.commit()
+    return int(new_id)
+
+
+def get_user(user_id: int) -> dict | None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph("SELECT * FROM users WHERE id = ?"), (user_id,))
+        return _user_row(cur.fetchone())
+
+
+def get_user_by_username(username: str) -> dict | None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph("SELECT * FROM users WHERE username = ?"), (username,))
+        return _user_row(cur.fetchone())
+
+
+def list_users() -> list[dict]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users ORDER BY role, username")
+        return [_user_row(r) for r in cur.fetchall()]
+
+
+def update_user(user_id: int, **fields) -> None:
+    fields = {k: v for k, v in fields.items() if k in _USER_UPDATABLE}
+    if not fields:
+        return
+    for k in ("active", "must_change_password"):
+        if k in fields:
+            fields[k] = int(bool(fields[k]))
+    assignments = ", ".join(f"{k} = ?" for k in fields)
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph(f"UPDATE users SET {assignments} WHERE id = ?"), (*fields.values(), user_id))
+        conn.commit()
+
+
+def record_login(user_id: int) -> None:
+    now = datetime.now()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph("UPDATE users SET last_login = ? WHERE id = ?"),
+                    (now if USE_POSTGRES else now.isoformat(timespec="seconds"), user_id))
+        conn.commit()
