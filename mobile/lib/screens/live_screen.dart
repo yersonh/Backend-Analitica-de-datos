@@ -2,10 +2,12 @@
 
 import 'package:flutter/material.dart';
 
+import '../api.dart';
 import '../app_state.dart';
 import '../live_controller.dart';
 import '../theme.dart';
 import '../util.dart';
+import '../widgets/camera_view.dart';
 import '../widgets/common.dart';
 import '../widgets/live_widgets.dart';
 
@@ -33,6 +35,22 @@ class LiveScreen extends StatelessWidget {
                   child: Text(live.error!, style: const TextStyle(color: C.rojo)),
                 ),
               _Hero(s: s, st: st, keyName: key),
+              if (app.can('todas_sesiones') || s['buzzer'] == true) _BuzzerCard(s: s, app: app),
+              GlassCard(
+                title: 'Cámara en vivo · lo que ve el modelo',
+                icon: Icons.videocam_outlined,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    LiveCameraView(sessionId: app.sessionId),
+                    const SizedBox(height: 10),
+                    const Note(
+                      'Verde: normal. Rojo: ojos cerrados o bostezo. Naranja: cabeza inclinada. '
+                      'La franja superior es el estado de la fusión (cámara + pulso).',
+                    ),
+                  ],
+                ),
+              ),
               _PulseCard(s: s, app: app),
               _FusionCard(s: s, st: st, keyName: key),
               _MetersCard(s: s, app: app),
@@ -537,6 +555,78 @@ class _Kpis extends StatelessWidget {
           KpiTile(label: 'Riesgo medio', value: '${c('medio')}', color: C.ambar),
           KpiTile(label: 'Adv. sensor', value: '${c('advertencia_sensor')}', color: C.violeta),
           KpiTile(label: 'Total eventos', value: '${c('alto') + c('medio') + c('advertencia_sensor')}', color: C.cyan),
+        ],
+      ),
+    );
+  }
+}
+
+/// Buzzer del dispositivo del conductor: suena solo con fatiga confirmada y un
+/// supervisor puede hacerlo sonar para despertarlo. El ESP32 lo recibe en su
+/// siguiente envío de pulso (cada ~2 s).
+class _BuzzerCard extends StatefulWidget {
+  const _BuzzerCard({required this.s, required this.app});
+  final Map<String, dynamic> s;
+  final AppState app;
+
+  @override
+  State<_BuzzerCard> createState() => _BuzzerCardState();
+}
+
+class _BuzzerCardState extends State<_BuzzerCard> {
+  bool _busy = false;
+
+  Future<void> _ring() async {
+    setState(() => _busy = true);
+    try {
+      final r = await widget.app.api.postJson('/api/buzzer', {'session_id': widget.app.sessionId, 'segundos': 5});
+      if (mounted) showSnack(context, 'Buzzer activado ${r['segundos']} s · el dispositivo lo recibe en ~2 s');
+    } on ApiException catch (e) {
+      if (mounted) showSnack(context, e.message, ok: false);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.s;
+    final on = s['buzzer'] == true;
+    final auto = s['buzzer_auto'] == true;
+    final manual = asDouble(s['buzzer_manual_seg']) ?? 0;
+    final canRing = widget.app.can('todas_sesiones');
+    final text = !on
+        ? 'Apagado. Suena solo si se confirma fatiga.'
+        : auto
+        ? 'Sonando: fatiga confirmada por el sistema.'
+        : 'Sonando por orden del supervisor (${manual.ceil()} s).';
+    return GlassCard(
+      accent: on ? C.rojo : null,
+      child: Row(
+        children: [
+          Icon(on ? Icons.notifications_active : Icons.notifications_none, color: on ? C.rojo : C.muted, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Buzzer del dispositivo', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                const SizedBox(height: 2),
+                Text(text, style: TextStyle(color: on ? C.rojo : C.muted, fontSize: 12.5)),
+              ],
+            ),
+          ),
+          if (canRing) ...[
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: _busy ? null : _ring,
+              style: FilledButton.styleFrom(backgroundColor: C.rojo, foregroundColor: const Color(0xFF1A0508)),
+              icon: _busy
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.campaign_outlined, size: 18),
+              label: const Text('Despertar'),
+            ),
+          ],
         ],
       ),
     );

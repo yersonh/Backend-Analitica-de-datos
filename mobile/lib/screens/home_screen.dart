@@ -7,12 +7,15 @@ import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../app_state.dart';
+import '../fleet_controller.dart';
 import '../live_controller.dart';
+import '../notifications.dart';
 import '../theme.dart';
 import '../util.dart';
 import '../widgets/brand.dart';
 import 'analytics_screen.dart';
 import 'change_password_screen.dart';
+import 'fleet_screen.dart';
 import 'history_screen.dart';
 import 'kss_screen.dart';
 import 'live_screen.dart';
@@ -34,8 +37,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
   );
   late final AppState _app = AppScope.read(context);
   late final LiveController _live = LiveController(_app)..onNewEvents = _alert;
+
+  /// Solo para quien ve todas las sesiones (supervisor, administrador).
+  late final FleetController? _fleet = _app.can('todas_sesiones')
+      ? (FleetController(_app)..onNewEvents = _fleetAlert)
+      : null;
   String? _session;
   int _tab = 0;
+  bool _foreground = true;
 
   @override
   void initState() {
@@ -44,6 +53,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     _session = _app.sessionId;
     _app.addListener(_onApp);
     _live.start();
+    if (_fleet != null) {
+      _fleet.start();
+      Notifier.requestPermission().then((_) => Notifier.startWatching());
+    }
   }
 
   @override
@@ -51,6 +64,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     WidgetsBinding.instance.removeObserver(this);
     _app.removeListener(_onApp);
     _live.dispose();
+    if (_fleet != null) {
+      _fleet.dispose();
+      Notifier.stopWatching(); // al cerrar sesión deja de vigilar
+    }
     _fade.dispose();
     super.dispose();
   }
@@ -58,10 +75,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // sin sondeo en segundo plano; al volver se reanuda de inmediato
+    _foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _live.start();
+      _fleet?.start();
     } else if (state == AppLifecycleState.paused) {
       _live.stop();
+      // la flota sigue (más despacio) para que el supervisor reciba notificaciones
+      _fleet?.start(background: true);
     }
   }
 
@@ -77,7 +98,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     final messenger = ScaffoldMessenger.of(context);
     for (final e in nuevos) {
       final r = riskStyle(e['risk_level'] as String?);
-      final title = e['risk_level'] == 'advertencia_sensor' ? 'Advertencia de sensor' : 'Nuevo episodio · ${r.label}';
+      final what = e['risk_level'] == 'advertencia_sensor' ? 'Advertencia de sensor' : 'Nuevo episodio · ${r.label}';
+      final title = e['_quien'] != null ? '${e['_quien']} · $what' : what;
       messenger.showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 6),
@@ -119,6 +141,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
         });
       }
     }
+  }
+
+  /// Episodios de otros conductores (el que se está mirando ya lo avisa el panel).
+  void _fleetAlert(List<(Map<String, dynamic>, Map<String, dynamic>)> nuevos) {
+    // fuera de la app: notificación del sistema por cada episodio (de cualquier conductor)
+    if (!_foreground) {
+      for (final (d, e) in nuevos) {
+        final r = riskStyle(e['risk_level'] as String?);
+        final quien = d['conductor'] ?? d['session_id'];
+        final what = e['risk_level'] == 'advertencia_sensor' ? 'Advertencia de sensor' : 'Fatiga · ${r.label}';
+        Notifier.show('$quien · $what', '${e['detail'] ?? ''}');
+      }
+      return;
+    }
+    final otros = [
+      for (final (d, e) in nuevos)
+        if (d['session_id'] != _app.sessionId) {...e, '_quien': d['conductor'] ?? d['session_id']},
+    ];
+    if (otros.isNotEmpty) _alert(otros);
+  }
+
+  /// Desde la flota: abre el panel en vivo de ese conductor.
+  void _openDriver(String sessionId) {
+    _app.selectSession(sessionId);
+    setState(() => _tab = 1); // Flota es la 0, Panel la 1
+    _fade.forward(from: 0);
   }
 
   Future<void> _pickSession() async {
@@ -163,6 +211,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final tabs = <(String, IconData, Widget)>[
+      if (_fleet != null) ('Flota', Icons.groups_2_outlined, FleetScreen(fleet: _fleet, onOpen: _openDriver)),
       ('Panel', Icons.speed, LiveScreen(live: _live)),
       ('Historial', Icons.history, HistoryScreen(live: _live)),
       // Quien ve todas las sesiones: panel de todos los usuarios + detalle.
@@ -172,7 +221,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
       else if (app.can('analitica') || app.can('analitica_propia'))
         ('Mi analítica', Icons.insights, const AnalyticsScreen()),
       if (app.can('autoreporte')) ('KSS', Icons.bedtime_outlined, const KssScreen()),
-      if (app.can('usuarios')) ('Usuarios', Icons.manage_accounts_outlined, const UsersScreen(embedded: true)),
     ];
     if (_tab >= tabs.length) _tab = 0;
 
@@ -197,7 +245,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Sesión ${app.sessionId ?? '—'}', style: const TextStyle(color: C.muted, fontSize: 12)),
+                        // con la flota se muestra el nombre del conductor que se está mirando
+                        Flexible(
+                          child: ListenableBuilder(
+                            listenable: _fleet ?? _live,
+                            builder: (context, _) {
+                              final who = _fleet?.driverFor(app.sessionId)?['conductor'];
+                              return Text(
+                                who != null ? '$who · ${app.sessionId}' : 'Sesión ${app.sessionId ?? '—'}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: C.muted, fontSize: 12),
+                              );
+                            },
+                          ),
+                        ),
                         if (app.can('todas_sesiones')) const Icon(Icons.arrow_drop_down, size: 18, color: C.muted),
                       ],
                     ),
@@ -306,6 +368,8 @@ class _UserMenu extends StatelessWidget {
       ),
       onSelected: (v) {
         switch (v) {
+          case 'users':
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const UsersScreen()));
           case 'password':
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChangePasswordScreen()));
           case 'logout':
@@ -334,6 +398,12 @@ class _UserMenu extends StatelessWidget {
           ),
         ),
         const PopupMenuDivider(),
+        // la gestión de usuarios va aquí: con la Flota, la barra inferior ya no tiene sitio
+        if (app.can('usuarios'))
+          const PopupMenuItem(
+            value: 'users',
+            child: ListTile(leading: Icon(Icons.manage_accounts_outlined), title: Text('Usuarios y roles')),
+          ),
         const PopupMenuItem(
           value: 'password',
           child: ListTile(leading: Icon(Icons.lock_outline), title: Text('Cambiar contraseña')),

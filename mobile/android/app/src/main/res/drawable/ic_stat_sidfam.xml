@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícono monocromo de notificación: el ojo + ECG del logo (mobile/branding/logo.svg).
+     Android pinta la barra de estado solo con la silueta, por eso va en blanco. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M256,236m-52,0a52,52 0,1 1,104 0a52,52 0,1 1,-104 0" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="40"
+        android:strokeLineCap="round"
+        android:pathData="M64,262 C136,128 376,128 448,262" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="38"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M64,262 C100,310 150,334 190,340 L224,340 L242,304 L260,410 L282,284 L298,340 L322,340 C362,334 412,310 448,262" />
+</vector>

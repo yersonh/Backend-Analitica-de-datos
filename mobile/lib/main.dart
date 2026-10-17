@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'app_state.dart';
+import 'notifications.dart';
 import 'screens/change_password_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -20,6 +21,7 @@ final _navigator = GlobalKey<NavigatorState>();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('es');
+  await Notifier.init();
   final state = AppState();
   runApp(AppScope(state: state, child: const SidfamApp()));
   await state.init();

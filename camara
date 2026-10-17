@@ -8,7 +8,7 @@
 // CONFIGURACIÓN (cambia esto)
 // =====================================================================
 const char* WIFI_SSID     = "Familia O.G";
-const char* WIFI_PASSWORD = "Carolina@1986*";  // <-- pon aquí la clave de tu WiFi
+const char* WIFI_PASSWORD = "TU_PASSWORD";  // <-- pon aquí la clave de tu WiFi
 
 // URL del backend SIN "/" final:
 //   - Railway: "https://tu-app.up.railway.app"
@@ -22,7 +22,9 @@ const char* SESSION_ID = "lauren_1";
 // (y que el que ya usas en el DevKit del pulso). Sin ella el backend responde 401.
 const char* DEVICE_API_KEY = "";  // <-- pon aquí la clave
 
-const unsigned long FRAME_INTERVAL_MS = 1500;   // un frame cada 1.5 s
+// ~3 frames por segundo para la cámara en vivo de la app. El ritmo real lo marca
+// la red: si cada envío tarda más, simplemente se manda el siguiente al terminar.
+const unsigned long FRAME_INTERVAL_MS = 333;
 const unsigned long COMM_TIMEOUT_MS   = 10000;  // sin respuesta en 10 s = pérdida de comunicación
 
 // ---------- Pines AI-Thinker ESP32-CAM ----------
@@ -92,7 +94,9 @@ bool initCamera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size   = FRAMESIZE_VGA;     // 640x480: suficiente para los landmarks faciales
+  // 320x240: pesa ~4 veces menos que VGA y permite ~3 fps hacia Railway. Face Mesh
+  // detecta bien la cara a esta resolución si el conductor está a menos de ~1 m.
+  config.frame_size   = FRAMESIZE_QVGA;
   config.jpeg_quality = 12;                // 10-15 razonable
   if (psramFound()) {
     config.fb_location = CAMERA_FB_IN_PSRAM;

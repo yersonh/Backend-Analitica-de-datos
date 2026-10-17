@@ -11,7 +11,7 @@ Referencia clásica para EAR/MAR: Soukupová & Čech (2016),
 "Real-Time Eye Blink Detection using Facial Landmarks".
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 
 import cv2
@@ -45,6 +45,9 @@ class VisionResult:
     eyes_closed: bool = False
     yawning: bool = False
     head_tilted: bool = False
+    # Los 468 puntos en píxeles, solo para dibujar la vista del modelo (app/overlay.py);
+    # no se guardan ni se envían en el JSON.
+    landmarks: list[tuple[float, float]] | None = field(default=None, repr=False)
 
 
 def _euclidean(p1, p2) -> float:
@@ -123,6 +126,7 @@ class FaceAnalyzer:
             eyes_closed=ear < EAR_THRESHOLD,
             yawning=mar > MAR_THRESHOLD,
             head_tilted=abs(tilt) > HEAD_TILT_THRESHOLD_DEG,
+            landmarks=landmarks,
         )
 
     def close(self):

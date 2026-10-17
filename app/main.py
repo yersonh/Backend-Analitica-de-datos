@@ -8,6 +8,9 @@ Endpoints:
                       de pulso y actualiza el estado de fusión.
   GET  /eventos    -> historial de eventos de fatiga en JSON.
   GET  /estado     -> estado actual de la fusión en tiempo real (JSON).
+  GET  /api/flota  -> todos los conductores con su estado, para supervisores (JSON).
+  GET  /api/camara -> último frame de la cámara con la vista del modelo (JPEG).
+  POST /api/buzzer -> un supervisor hace sonar el buzzer del conductor.
   GET  /            -> dashboard HTML (RF09, RF10).
 
 Analítica de datos (ver app/analytics.py):
@@ -43,19 +46,20 @@ Ejecutar en desarrollo:
 
 import io
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
 import cv2
 import numpy as np
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from pydantic import BaseModel
 
-from . import analytics, auth, database, pulse, vision
+from . import analytics, auth, database, overlay, pulse, vision
 from .auth import User, require
 from .fusion import fusion_engine
 from .pulse import pulse_analyzer
@@ -73,6 +77,25 @@ app.mount(
 )
 
 DEFAULT_SESSION_ID = "default"
+
+# --- Cámara en vivo (solo en memoria, nunca en la base) ---
+# Último frame de cada sesión ya anotado con la vista del modelo (JPEG, hora).
+_live_frames: dict[str, tuple[bytes, float]] = {}
+CAMERA_STALE_SECONDS = 10   # sin frames nuevos en este tiempo, la app muestra "sin video"
+
+# --- Buzzer del dispositivo del conductor ---
+# Suena solo mientras haya alerta confirmada (RF06) o durante el tiempo que pida
+# un supervisor. El ESP32 no puede recibir llamadas del servidor (está detrás del
+# router), así que se entera en la respuesta de cada /pulso y /frame.
+_buzzer_until: dict[str, float] = {}
+BUZZER_DEFAULT_SECONDS = 5
+BUZZER_MAX_SECONDS = 15
+
+
+def _buzzer_state(session_id: str, status: dict) -> dict:
+    manual = max(0.0, _buzzer_until.get(session_id, 0.0) - time.time())
+    auto = status.get("status") == "alerta"
+    return {"buzzer": auto or manual > 0, "buzzer_auto": auto, "buzzer_manual_seg": round(manual, 1)}
 
 
 @app.on_event("startup")
@@ -160,6 +183,8 @@ async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEF
         risk_level=status["risk_level"],
     )
 
+    _live_frames[session_id] = (overlay.annotate(image_bgr, vision_result, status), time.time())
+
     return {
         "face_detected": vision_result.face_detected,
         "ear": vision_result.ear,
@@ -172,6 +197,7 @@ async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEF
         "estado": status["status"],
         "alerta": status["status"] == "alerta",
         "nivel_riesgo": status["risk_level"],
+        "buzzer": _buzzer_state(session_id, status)["buzzer"],
     }
 
 
@@ -208,6 +234,8 @@ async def receive_pulse(bpm: float = Form(...), session_id: str = Form(DEFAULT_S
         "estado": status["status"],
         "alerta": status["status"] == "alerta",
         "nivel_riesgo": status["risk_level"],
+        # el ESP32 de pulso hace sonar el buzzer mientras esto sea true
+        "buzzer": _buzzer_state(session_id, status)["buzzer"],
     }
 
 
@@ -230,7 +258,91 @@ def get_status(session_id: str | None = None, user: User = Depends(require("pane
     # Tras reiniciar el servidor la memoria está vacía: se envía lo último guardado
     # (cámara y pulso por separado) para que el panel no aparezca vacío.
     status["ultima_guardada"] = None if status["has_any_data"] else database.last_readings(session_id)
+    status.update(_buzzer_state(session_id, status))
+    frame = _live_frames.get(session_id)
+    status["camara_activa"] = bool(frame and time.time() - frame[1] <= CAMERA_STALE_SECONDS)
     return status
+
+
+@app.get("/api/camara")
+def get_camera_frame(session_id: str | None = None, user: User = Depends(require("panel"))):
+    """Último frame de la cámara con la vista del modelo dibujada (image/jpeg).
+    204 si no llegan frames de esa sesión hace más de CAMERA_STALE_SECONDS."""
+    session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
+    frame = _live_frames.get(session_id)
+    if not frame or time.time() - frame[1] > CAMERA_STALE_SECONDS:
+        return Response(status_code=204)
+    return Response(frame[0], media_type="image/jpeg", headers={
+        "Cache-Control": "no-store",
+        "X-Frame-Age": f"{time.time() - frame[1]:.1f}",
+    })
+
+
+class BuzzerIn(BaseModel):
+    session_id: str
+    segundos: int = BUZZER_DEFAULT_SECONDS
+
+
+@app.post("/api/buzzer", dependencies=[Depends(require("todas_sesiones"))])
+def trigger_buzzer(body: BuzzerIn):
+    """Un supervisor hace sonar el buzzer del conductor durante unos segundos.
+    El dispositivo lo recibe en su siguiente envío (cada ~2 s)."""
+    segundos = max(1, min(BUZZER_MAX_SECONDS, body.segundos))
+    _buzzer_until[body.session_id] = time.time() + segundos
+    return {"session_id": body.session_id, "segundos": segundos}
+
+
+# Orden de la vista de flota: lo más urgente primero
+_FLEET_ORDER = ["alerta-alto", "alerta-medio", "advertencia_sensor", "vigilancia", "normal", "sindatos"]
+
+
+@app.get("/api/flota", dependencies=[Depends(require("todas_sesiones"))])
+def get_fleet():
+    """Vista de flota para supervisores: cada conductor (o sesión con lecturas)
+    con su estado actual, último pulso/EAR, antigüedad de la última lectura y
+    eventos de hoy, ordenados por urgencia."""
+    sesiones = {s["session_id"]: s for s in database.list_sessions()}
+    conductores = {
+        u["session_id"]: u for u in database.list_users()
+        if u["role"] == "conductor" and u.get("session_id") and u.get("active")
+    }
+    eventos = database.fleet_event_summary()
+    now = datetime.now()
+    items = []
+    for sid in set(sesiones) | set(conductores):
+        st = fusion_engine.get_current_status(sid)
+        u, s, ev = conductores.get(sid), sesiones.get(sid), eventos.get(sid, {})
+        if not st["has_any_data"]:
+            estado = "sindatos"
+        elif st["status"] == "alerta":
+            estado = f"alerta-{st['risk_level'] or 'medio'}"
+        else:
+            estado = st["status"]
+        guardada = None if st["has_any_data"] else database.last_readings(sid)
+        bpm = st["bpm"] if st["has_any_data"] else ((guardada or {}).get("pulso") or {}).get("bpm")
+        ear = st["ear"] if st["has_any_data"] else ((guardada or {}).get("frame") or {}).get("ear")
+        edad = None
+        if s and s.get("hasta"):
+            edad = max(0, round((now - datetime.fromisoformat(str(s["hasta"]))).total_seconds()))
+        items.append({
+            "session_id": sid,
+            "conductor": (u.get("full_name") or u["username"]) if u else None,
+            "username": u["username"] if u else None,
+            "estado": estado,
+            "en_vivo": bool(st["data_is_fresh"]),
+            "detail": st["detail"],
+            "bpm": bpm,
+            "ear": ear,
+            "baseline_bpm": st["baseline_bpm"],
+            "lecturas": int(s["lecturas"]) if s else 0,
+            "ultima_lectura_seg": edad,
+            "eventos_hoy": ev.get("hoy", {}),
+            "ultimo_evento": ev.get("ultimo"),
+        })
+    items.sort(key=lambda i: (_FLEET_ORDER.index(i["estado"]) if i["estado"] in _FLEET_ORDER else 9,
+                              i["ultima_lectura_seg"] if i["ultima_lectura_seg"] is not None else 10**9))
+    resumen = {k: sum(1 for i in items if i["estado"] == k) for k in _FLEET_ORDER}
+    return {"conductores": items, "resumen": resumen}
 
 
 # ---------------------------------------------------------------------------

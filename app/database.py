@@ -447,6 +447,31 @@ def last_readings(session_id: str) -> dict:
     return out
 
 
+def fleet_event_summary() -> dict[str, dict]:
+    """Por sesión: eventos de hoy por nivel y el último evento (vista de flota).
+
+    La antigüedad se calcula aquí porque las horas se guardan sin zona horaria.
+    """
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    since = today if USE_POSTGRES else today.isoformat(timespec="seconds")
+    out: dict[str, dict] = {}
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph("SELECT session_id, risk_level, COUNT(*) AS n FROM fatigue_events "
+                        "WHERE timestamp >= ? GROUP BY session_id, risk_level"), (since,))
+        for r in cur.fetchall():
+            out.setdefault(r["session_id"], {"hoy": {}, "ultimo": None})["hoy"][r["risk_level"]] = int(r["n"])
+        cur.execute("SELECT * FROM fatigue_events e WHERE id = "
+                    "(SELECT MAX(id) FROM fatigue_events WHERE session_id = e.session_id)")
+        for r in _iso_rows(cur.fetchall()):
+            ts = datetime.fromisoformat(r["timestamp"]) if isinstance(r["timestamp"], str) else r["timestamp"]
+            out.setdefault(r["session_id"], {"hoy": {}, "ultimo": None})["ultimo"] = {
+                "id": r["id"], "risk_level": r["risk_level"], "detail": r["detail"],
+                "age_seconds": max(0, round((datetime.now() - ts).total_seconds())),
+            }
+    return out
+
+
 def list_sessions() -> list[dict]:
     """Sesiones que tienen lecturas, con su cantidad y rango de fechas."""
     sql = """

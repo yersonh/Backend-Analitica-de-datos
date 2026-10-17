@@ -165,14 +165,37 @@ HMAC token as the cookie; the app sends it as `Authorization: Bearer` and
 `/api/cuenta/clave` returns a fresh token because changing the password bumps
 `session_version`. `/api/config` supplies the thresholds the HTML gets inlined.
 Everything else reuses the existing JSON endpoints, so **changing a JSON
-response shape (`/estado`, `/eventos`, `/analitica/reporte`, `/api/usuarios`)
-means updating the matching screen in `mobile/lib/screens/`**. Polling cadence
+response shape (`/estado`, `/eventos`, `/analitica/reporte`, `/api/usuarios`,
+`/api/flota`) means updating the matching screen in `mobile/lib/screens/`**.
+`/api/flota` (permission `todas_sesiones`) is mobile-only: every conductor/session
+with live status, last reading age and today's events, sorted by urgency; it backs
+the supervisor's "Flota" tab (`fleet_screen.dart`, polled every 3 s by
+`fleet_controller.dart`, which also alerts on new events from any session). Polling cadence
 matches the web (1.5s status, 4s events) in `mobile/lib/live_controller.dart`.
 
 ## Firmware ↔ backend contract
 
-`firmware/esp32cam_frame_sender` POSTs `multipart/form-data` to `/frame` every
-~1.5s with fields `session_id` and `file` (JPEG). `firmware/esp32_pulse_sender`
-POSTs `application/x-www-form-urlencoded` `bpm` + `session_id` to `/pulso` every
-~2s. Both send `X-Device-Key` when their `DEVICE_API_KEY` constant is non-empty. If you change endpoint paths, field names, or form vs. JSON
-encoding in `app/main.py`, update the matching `.ino` sketch.
+The camera sketch actually flashed is `camara` (repo root; QVGA, a frame every
+~333 ms for the app's live video); `firmware/esp32cam_frame_sender` is the older
+reference (VGA, ~1.5s). Both POST `multipart/form-data` to `/frame` with fields
+`session_id` and `file` (JPEG). `firmware/esp32_pulse_sender` POSTs
+`application/x-www-form-urlencoded` `bpm` + `session_id` to `/pulso` every ~2s
+and drives an active buzzer on GPIO 25 from the response's `"buzzer"` field
+(compact JSON, matched as the literal `"buzzer":true`; it switches off on its own
+after 5 s without confirmation). All send `X-Device-Key` when their
+`DEVICE_API_KEY` constant is non-empty. If you change endpoint paths, field names,
+form vs. JSON encoding, or the `buzzer` field in `app/main.py`, update the
+matching sketch.
+
+**Live camera and buzzer** (`app/main.py`, in memory only): `/frame` stores the
+last frame per session already annotated by `app/overlay.py` (mesh, eye/mouth
+contours, EAR/MAR/tilt, fusion banner); `GET /api/camara` serves it as JPEG (204
+when stale > `CAMERA_STALE_SECONDS`). `buzzer` is true while the fusion status is
+`alerta` or for the seconds a supervisor requested via `POST /api/buzzer`
+(permission `todas_sesiones`); `/estado` exposes `buzzer`, `buzzer_auto`,
+`buzzer_manual_seg` and `camara_activa`. A restart clears frames and pending
+buzzer requests. Supervisors get system notifications of fleet events through
+`mobile/lib/notifications.dart`; an Android foreground service ("vigilando la
+flota", type `dataSync`, `android:stopWithTask="true"` in the manifest) keeps the
+app from being frozen in the background — do not set the plugin's own
+`stopWithTask` option, it stops the service as soon as the app is hidden.

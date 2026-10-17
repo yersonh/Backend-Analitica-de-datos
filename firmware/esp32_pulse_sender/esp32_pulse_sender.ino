@@ -12,6 +12,11 @@
 
   Librerías necesarias (Library Manager de Arduino IDE):
     - SparkFun MAX3010x Pulse and Proximity Sensor Library
+
+  Buzzer (activo, en BUZZER_PIN): la respuesta de /pulso trae "buzzer": true
+  mientras el sistema confirma fatiga o mientras un supervisor lo activó desde
+  la app. Suena intermitente y se apaga solo si deja de llegar respuesta
+  (BUZZER_SAFETY_MS), para que nunca quede pitando sin control.
 */
 
 #include <WiFi.h>
@@ -30,6 +35,15 @@ const char* SESSION_ID    = "default";
 const char* DEVICE_API_KEY = "";
 
 const unsigned long PULSE_SEND_INTERVAL_MS = 2000;  // cada 2s (ajustable)
+
+// ---------- Buzzer ----------
+const int BUZZER_PIN = 25;                     // buzzer ACTIVO: HIGH = suena
+const unsigned long BUZZER_ON_MS = 300;        // patrón intermitente: 300 ms sonando...
+const unsigned long BUZZER_OFF_MS = 200;       // ...200 ms en silencio
+const unsigned long BUZZER_SAFETY_MS = 5000;   // sin confirmación del servidor en 5 s -> se apaga
+
+bool buzzerWanted = false;          // lo que pidió el servidor en la última respuesta
+unsigned long buzzerConfirmedAt = 0;
 
 MAX30105 particleSensor;
 
@@ -85,6 +99,17 @@ void updatePulseReading() {
   }
 }
 
+// Patrón intermitente sin bloquear el loop (la lectura del sensor sigue corriendo).
+void updateBuzzer() {
+  bool active = buzzerWanted && (millis() - buzzerConfirmedAt < BUZZER_SAFETY_MS);
+  if (!active) {
+    digitalWrite(BUZZER_PIN, LOW);
+    return;
+  }
+  unsigned long phase = millis() % (BUZZER_ON_MS + BUZZER_OFF_MS);
+  digitalWrite(BUZZER_PIN, phase < BUZZER_ON_MS ? HIGH : LOW);
+}
+
 void sendPulseReading(float bpm) {
   HTTPClient http;
   String url = String(SERVER_HOST) + "/pulso";
@@ -94,12 +119,18 @@ void sendPulseReading(float bpm) {
     http.addHeader("X-Device-Key", DEVICE_API_KEY);
   }
 
-  String body = "bpm=" + String(bpm, 1) + "&session_id=" + String(SESSION_ID);
-  int httpCode = http.POST(body);
+  String form = "bpm=" + String(bpm, 1) + "&session_id=" + String(SESSION_ID);
+  int httpCode = http.POST(form);
 
   if (httpCode > 0) {
+    String body = http.getString();
     Serial.printf("POST /pulso -> %d\n", httpCode);
-    Serial.println(http.getString());
+    Serial.println(body);
+    if (httpCode == 200) {
+      // JSON simple: basta buscar el campo, sin librería extra
+      buzzerWanted = body.indexOf("\"buzzer\":true") >= 0 || body.indexOf("\"buzzer\": true") >= 0;
+      buzzerConfirmedAt = millis();
+    }
   } else {
     Serial.printf("Error en POST /pulso: %s\n", http.errorToString(httpCode).c_str());
   }
@@ -108,6 +139,8 @@ void sendPulseReading(float bpm) {
 
 void setup() {
   Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
   Wire.begin();
   setupSensor();
   connectWiFi();
@@ -115,6 +148,7 @@ void setup() {
 
 void loop() {
   updatePulseReading();
+  updateBuzzer();
 
   if (millis() - lastSendTime >= PULSE_SEND_INTERVAL_MS) {
     lastSendTime = millis();

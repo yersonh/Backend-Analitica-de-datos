@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- SIDFAM: acceso al backend; HTTP sin TLS para la IP local de uvicorn -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Supervisor: servicio en primer plano para seguir vigilando la flota y
+         notificar episodios con la app en segundo plano (flutter_foreground_task) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
         android:label="SIDFAM"
         android:usesCleartextTraffic="true"
@@ -33,6 +38,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Ícono monocromo para la notificación fija de "vigilando la flota" -->
+        <meta-data
+            android:name="co.sidfam.NOTIFICATION_ICON"
+            android:resource="@drawable/ic_stat_sidfam"/>
+        <!-- No cambiar el nombre: lo exige flutter_foreground_task -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="true"
+            android:exported="false"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
