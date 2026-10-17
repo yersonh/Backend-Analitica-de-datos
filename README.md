@@ -48,7 +48,7 @@ las demás cuentas.
 |---|---|
 | **Administrador** | Todo lo del supervisor + gestionar usuarios (crear, cambiar rol/sesión, desactivar, restablecer contraseña) |
 | **Supervisor** | Ver todas las sesiones en vivo, el historial y la analítica; exportar CSV; registrar KSS |
-| **Conductor** | Ver **solo su sesión asignada** (el `SESSION_ID` de sus ESP32) en vivo y su historial; registrar su KSS |
+| **Conductor** | Ver **solo su sesión asignada** (el `SESSION_ID` de sus ESP32) en vivo, su historial y la analítica CRISP-DM de **sus** datos; registrar su KSS |
 
 Los permisos y roles están definidos en `app/auth.py` (`PERMISOS`, `ROLES`).
 Contraseñas con PBKDF2-SHA256, cookie de sesión firmada (HttpOnly,
@@ -64,6 +64,48 @@ Variables de entorno (en Railway, en *Variables* del servicio):
 | `SECRET_KEY` | Firma las cookies. **Obligatoria en producción**; sin ella las sesiones se cierran en cada reinicio. Genera una con `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `DEVICE_API_KEY` | Clave que deben enviar los ESP32 en `X-Device-Key`. Si no se define, `/frame` y `/pulso` aceptan datos de cualquiera (solo para desarrollo local). Pon el mismo valor en `DEVICE_API_KEY` de los dos `.ino` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Opcional: credenciales del primer administrador en lugar de la contraseña temporal generada |
+
+### App móvil (Flutter)
+
+La carpeta `mobile/` tiene una app Flutter (Android/iOS) que replica el panel
+web: login con los mismos roles, estado en vivo, historial, analítica CRISP-DM,
+autoreporte KSS y gestión de usuarios. **No reemplaza al backend**: los ESP32
+siguen enviando a `/frame` y `/pulso` y el análisis sigue en el servidor; la
+app solo consume la API. Instrucciones en [`mobile/README.md`](mobile/README.md).
+
+Para ella el backend expone una API JSON con token Bearer (el mismo token
+firmado de la cookie): `POST /api/login`, `POST /api/cuenta/clave` y
+`GET /api/config` (umbrales y roles).
+
+### Analítica de datos (CRISP-DM)
+
+`app/analytics.py` sigue las 6 fases de CRISP-DM y el reporte
+(`GET /analitica/reporte`) incluye un resumen por fase (`crisp_dm`) con lo que
+salió en cada conjunto de datos: negocio y criterios de éxito (recall ≥ 80 %,
+precisión ≥ 70 %, ajustables en `CRITERIO_RECALL` / `CRITERIO_PRECISION`),
+calidad de datos, preparación en ventanas, modelado (K-Means, árbol de
+decisión, **regresión**, Isolation Forest), evaluación y despliegue con
+recomendaciones.
+
+**Regresión logística o lineal** (`regression()`): se elige según la variable
+objetivo disponible.
+
+- **Lineal**, si hay suficientes ventanas con autoreporte KSS y este toma al
+  menos 3 niveles: la escala 1-9 es numérica, así que se estima el nivel de
+  somnolencia (R², MAE, RMSE frente a un modelo base). Solo se elige si
+  explica algo (R² ≥ `MIN_R2_LINEAL`).
+- **Logística**, si el objetivo es binario (fatiga sí/no: KSS ≥ 7 o, sin KSS,
+  el estado de la fusión): modela la probabilidad de fatiga (precisión,
+  recall, F1, AUC-ROC, odds ratio por variable).
+
+Cuando se pueden las dos se calculan ambas y `modelo_elegido` + `motivo`
+explican la elección.
+
+`GET /analitica/usuarios` (administrador y supervisor) resume a cada persona
+monitoreada para compararlas: episodios por hora, % del tiempo en alerta, BPM
+y basal, PERCLOS, KSS y un nivel de riesgo; incluye a los conductores que aún
+no envían datos. El conductor tiene el permiso `analitica_propia`: ve la
+analítica de su sesión y nada más.
 
 ## 3. Probar sin hardware (mientras el prototipo físico se arma)
 
@@ -97,6 +139,7 @@ sidfam-backend/
 ├── firmware/
 │   ├── esp32cam_frame_sender/    # .ino de ejemplo para el ESP32-CAM
 │   └── esp32_pulse_sender/        # .ino de ejemplo para el ESP32 + sensor de pulso
+├── mobile/                        # App Flutter (cliente móvil del panel)
 ├── requirements.txt
 └── README.md
 ```

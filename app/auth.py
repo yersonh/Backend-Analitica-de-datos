@@ -7,9 +7,10 @@ Roles (de mayor a menor alcance):
                      cambiar rol/sesión, desactivar, restablecer contraseña).
   - supervisor    -> ve TODAS las sesiones en vivo, el historial y la
                      analítica (KDD), exporta CSV y registra KSS.
-  - conductor     -> ve SOLO su sesión asignada (users.session_id) en vivo
-                     y su historial, y registra su propio KSS. Sin analítica
-                     ni exportación.
+  - conductor     -> ve SOLO su sesión asignada (users.session_id) en vivo,
+                     su historial y la analítica de SUS datos
+                     (analitica_propia), y registra su propio KSS. Sin
+                     exportación.
 
 Los permisos son cadenas cortas (PERMISOS) y cada rol es un conjunto de ellas;
 los endpoints piden permisos, nunca roles, así añadir un rol nuevo es solo
@@ -62,7 +63,8 @@ SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 PERMISOS = {
     "panel": "Ver el panel en vivo y el historial de episodios",
     "todas_sesiones": "Ver cualquier sesión (no solo la propia)",
-    "analitica": "Ver la analítica de datos (KDD)",
+    "analitica": "Ver la analítica de datos (CRISP-DM) de cualquier sesión",
+    "analitica_propia": "Ver la analítica de datos (CRISP-DM) de su propia sesión",
     "exportar": "Descargar lecturas y datasets en CSV",
     "autoreporte": "Registrar el autoreporte de somnolencia (KSS)",
     "usuarios": "Gestionar usuarios y roles",
@@ -77,12 +79,12 @@ ROLES = {
     "supervisor": {
         "label": "Supervisor",
         "descripcion": "Monitorea todas las sesiones, consulta la analítica y exporta datos. No gestiona usuarios.",
-        "permisos": {"panel", "todas_sesiones", "analitica", "exportar", "autoreporte"},
+        "permisos": {"panel", "todas_sesiones", "analitica", "analitica_propia", "exportar", "autoreporte"},
     },
     "conductor": {
         "label": "Conductor",
-        "descripcion": "Ve únicamente su propia sesión en vivo y su historial, y registra su autoreporte KSS.",
-        "permisos": {"panel", "autoreporte"},
+        "descripcion": "Ve únicamente su propia sesión en vivo, su historial y la analítica de sus datos, y registra su autoreporte KSS.",
+        "permisos": {"panel", "autoreporte", "analitica_propia"},
     },
 }
 
@@ -189,6 +191,7 @@ class User:
             "id": self.id, "username": self.username, "full_name": self.full_name,
             "role": self.role, "role_label": self.role_label, "session_id": self.session_id,
             "permisos": sorted(self.permisos),
+            "must_change_password": self.must_change_password,
         }
 
 
@@ -234,13 +237,22 @@ def clear_session_cookie(response) -> None:
     response.delete_cookie(COOKIE_NAME, path="/")
 
 
+def _request_token(request: Request) -> str:
+    """Token de la cabecera `Authorization: Bearer ...` (app móvil) o, si no
+    viene, de la cookie (panel web). Es el mismo token firmado en ambos casos."""
+    header = request.headers.get("authorization", "")
+    if header[:7].lower() == "bearer ":
+        return header[7:].strip()
+    return request.cookies.get(COOKIE_NAME, "")
+
+
 def get_current_user(request: Request) -> User | None:
-    """Usuario de la cookie, o None. Comprueba en BD que siga activo y que la
-    sesión no haya sido invalidada (session_version)."""
+    """Usuario del token (cookie o Bearer), o None. Comprueba en BD que siga
+    activo y que la sesión no haya sido invalidada (session_version)."""
     if hasattr(request.state, "user"):
         return request.state.user
     user = None
-    data = _read_token(request.cookies.get(COOKIE_NAME, ""))
+    data = _read_token(_request_token(request))
     if data:
         row = database.get_user(data[0])
         if row and row["active"] and int(row["session_version"]) == data[1] and row["role"] in ROLES:
@@ -253,6 +265,9 @@ def _check_same_origin(request: Request) -> None:
     """Defensa CSRF adicional a SameSite=Lax: una petición que modifica datos
     con la cookie debe venir de esta misma web."""
     if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    # Con Bearer el navegador no adjunta la credencial solo: no hay CSRF posible.
+    if request.headers.get("authorization", "")[:7].lower() == "bearer ":
         return
     origin = request.headers.get("origin") or request.headers.get("referer")
     if origin and urlparse(origin).netloc != request.headers.get("host"):
@@ -273,6 +288,18 @@ def require(permiso: str | None = None, allow_password_change: bool = False):
         if user.must_change_password and not allow_password_change:
             raise PasswordChangeRequired()
         if permiso and not user.can(permiso):
+            raise Forbidden()
+        return user
+    return dependency
+
+
+def require_any(*permisos: str):
+    """Como require(), pero basta con tener UNO de los permisos."""
+    base = require()
+
+    def dependency(request: Request) -> User:
+        user = base(request)
+        if not any(user.can(p) for p in permisos):
             raise Forbidden()
         return user
     return dependency

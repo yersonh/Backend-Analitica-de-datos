@@ -9,7 +9,9 @@ backend (`app/`) receives camera frames from an ESP32-CAM and heart-rate reading
 from an ESP32, runs vision + pulse analysis, fuses the two signals into a risk
 level, persists fatigue episodes to SQLite, and serves an HTML dashboard.
 `firmware/` holds reference Arduino sketches for the two devices — they are not
-built here, only kept in sync with the backend's HTTP contract.
+built here, only kept in sync with the backend's HTTP contract. `mobile/` is a
+Flutter app (Android/iOS) that mirrors the HTML dashboard as an API client; all
+detection stays server-side.
 
 Code, comments, docstrings and the README are written in Spanish; match that when
 editing. `README.md` also carries the theoretical background (EAR/MAR definitions,
@@ -111,10 +113,23 @@ backend-agnostic. `_ph()` swaps `?`→`%s` for the Postgres branch; Postgres use
 `CREATE TABLE IF NOT EXISTS` — no migrations. On Railway the SQLite file is
 ephemeral (and `.dockerignore`d); Postgres is what survives deploys.
 
+**`app/analytics.py`** — offline data mining over `sensor_readings`, structured as
+CRISP-DM. `full_report()` cleans readings, aggregates them into time windows
+(`build_windows`, 8 `FEATURES`), then runs K-Means, a decision tree, `regression()`
+and Isolation Forest, and `crisp_dm_phases()` summarizes the six phases from those
+results. `regression()` picks **linear** (target = KSS 1-9) when enough varied KSS
+self-reports exist and R² ≥ `MIN_R2_LINEAL`, else **logistic** (binary fatigue, via
+`_binary_target`: KSS ≥ 7 or the fusion-rule label); both share `_split`/`_cv`
+with the tree (split by person when ≥ 3 people). `users_overview()` feeds the
+per-user comparison (`/analitica/usuarios`). Everything returns `_clean()`ed JSON
+consumed by both the web dashboard JS and `mobile/lib/screens/analytics_screen.dart`.
+
 **`app/auth.py`** — access control, stdlib only (PBKDF2 hashes, HMAC-signed
 cookie `sidfam_sesion` carrying user id + `session_version` + expiry; bumping
 `users.session_version` revokes every open login). Roles are sets of
-permission strings in `ROLES` (`administrador` ⊃ `supervisor` ⊃ `conductor`);
+permission strings in `ROLES` (`administrador` ⊃ `supervisor` ⊃ `conductor`;
+`analitica_propia` = analytics of one's own session only, `auth.require_any(...)` for
+endpoints that accept either of several permissions);
 **endpoints depend on permissions, never on role names**: use
 `Depends(require("<permiso>"))`. A `conductor` is bound to `users.session_id`;
 always pass a requested `session_id` through `auth.resolve_session(user, ...)`
@@ -133,6 +148,19 @@ session; keep new code session-scoped.
 All tuning thresholds are module-level constants at the top of `vision.py`,
 `pulse.py`, and `fusion.py` — they are placeholders to be calibrated with real
 hardware and are the main thing that will change during testing.
+
+## Mobile app (`mobile/`)
+
+Flutter client of the same backend (`cd mobile && flutter analyze && flutter test`;
+`flutter run` / `flutter build apk`). Auth: `POST /api/login` returns the same
+HMAC token as the cookie; the app sends it as `Authorization: Bearer` and
+`auth.get_current_user` accepts either (Bearer skips the CSRF origin check).
+`/api/cuenta/clave` returns a fresh token because changing the password bumps
+`session_version`. `/api/config` supplies the thresholds the HTML gets inlined.
+Everything else reuses the existing JSON endpoints, so **changing a JSON
+response shape (`/estado`, `/eventos`, `/analitica/reporte`, `/api/usuarios`)
+means updating the matching screen in `mobile/lib/screens/`**. Polling cadence
+matches the web (1.5s status, 4s events) in `mobile/lib/live_controller.dart`.
 
 ## Firmware ↔ backend contract
 

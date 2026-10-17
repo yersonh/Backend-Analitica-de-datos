@@ -1,0 +1,148 @@
+// Sondeo del estado en vivo y del historial, con los mismos intervalos que el
+// panel web: /estado cada 1,5 s y /eventos cada 4 s.
+
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
+import 'api.dart';
+import 'app_state.dart';
+
+class TrendPoint {
+  const TrendPoint(this.t, this.v);
+  final DateTime t;
+  final double v;
+}
+
+class LiveController extends ChangeNotifier {
+  LiveController(this.app);
+
+  final AppState app;
+
+  static const histMax = 120;
+  static const statusEvery = Duration(milliseconds: 1500);
+  static const eventsEvery = Duration(seconds: 4);
+
+  Map<String, dynamic>? status;
+  bool connected = false;
+  String? error;
+
+  List<Map<String, dynamic>> events = [];
+  Map<String, dynamic> counts = {};
+  Set<int> freshIds = {};
+  int? _maxId;
+
+  final List<TrendPoint> earHist = [];
+  final List<TrendPoint> bpmHist = [];
+
+  /// Se llama con los eventos nuevos (más antiguo primero) para avisar al usuario.
+  void Function(List<Map<String, dynamic>> nuevos)? onNewEvents;
+
+  Timer? _statusTimer, _eventsTimer;
+  bool _statusBusy = false, _eventsBusy = false;
+  String? _session;
+
+  String? get session => _session;
+
+  void start() {
+    stop();
+    _session = app.sessionId;
+    _pollStatus();
+    _pollEvents();
+    _statusTimer = Timer.periodic(statusEvery, (_) => _pollStatus());
+    _eventsTimer = Timer.periodic(eventsEvery, (_) => _pollEvents());
+  }
+
+  void stop() {
+    _statusTimer?.cancel();
+    _eventsTimer?.cancel();
+    _statusTimer = _eventsTimer = null;
+  }
+
+  /// Cambió la sesión seleccionada: empieza de cero.
+  void reset() {
+    status = null;
+    events = [];
+    counts = {};
+    freshIds = {};
+    _maxId = null;
+    earHist.clear();
+    bpmHist.clear();
+    error = null;
+    notifyListeners();
+    start();
+  }
+
+  Map<String, String> get _query => {'session_id': ?_session};
+
+  Future<void> _pollStatus() async {
+    if (_statusBusy || !app.loggedIn) return;
+    _statusBusy = true;
+    final session = _session;
+    try {
+      final s = await app.api.getJson('/estado', _query);
+      if (session != _session) return;
+      status = s;
+      connected = true;
+      error = null;
+      if (s['data_is_fresh'] == true) {
+        _push(earHist, s['ear']);
+        _push(bpmHist, s['bpm']);
+      }
+    } on ApiException catch (e) {
+      connected = false;
+      error = e.status == 0 ? null : e.message;
+    } finally {
+      _statusBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _pollEvents() async {
+    if (_eventsBusy || !app.loggedIn) return;
+    _eventsBusy = true;
+    final session = _session;
+    try {
+      final data = await app.api.getJson('/eventos', _query);
+      if (session != _session) return;
+      final next = ((data['events'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
+      counts = ((data['counts_by_risk'] as Map?) ?? const {}).cast<String, dynamic>();
+
+      final fresh = <int>{};
+      if (_maxId != null) {
+        for (final e in next) {
+          final id = e['id'] as int;
+          if (id > _maxId!) fresh.add(id);
+        }
+      }
+      for (final e in next) {
+        final id = e['id'] as int;
+        if (_maxId == null || id > _maxId!) _maxId = id;
+      }
+      _maxId ??= 0;
+      events = next;
+      freshIds = fresh;
+      if (fresh.isNotEmpty) {
+        final nuevos = next.reversed.where((e) => fresh.contains(e['id'])).toList();
+        onNewEvents?.call(nuevos.length > 3 ? nuevos.sublist(nuevos.length - 3) : nuevos);
+      }
+    } on ApiException {
+      // el estado ya refleja la falta de conexión
+    } finally {
+      _eventsBusy = false;
+      notifyListeners();
+    }
+  }
+
+  void _push(List<TrendPoint> list, dynamic v) {
+    if (v is! num) return;
+    list.add(TrendPoint(DateTime.now(), v.toDouble()));
+    if (list.length > histMax) list.removeAt(0);
+  }
+
+  @override
+  void dispose() {
+    stop();
+    super.dispose();
+  }
+}

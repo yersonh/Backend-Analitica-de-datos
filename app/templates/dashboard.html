@@ -644,7 +644,7 @@
             .reveal { opacity: 1; transform: none; }
         }
     </style>
-    {% if "analitica" in perms %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>{% endif %}
+    {% if "analitica" in perms or "analitica_propia" in perms %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>{% endif %}
 </head>
 <body>
     <!-- ===== Fondo ===== -->
@@ -692,7 +692,7 @@
                 <div class="sub">Sistema inteligente de detección de fatiga en conductores</div>
             </div>
             <div class="grow"></div>
-            {% if "analitica" in perms %}<a class="chip chip-btn" href="#analitica" style="text-decoration:none">Analítica de datos ↓</a>{% endif %}
+            {% if "analitica" in perms or "analitica_propia" in perms %}<a class="chip chip-btn" href="#analitica" style="text-decoration:none">Analítica de datos ↓</a>{% endif %}
             <span class="chip">Sesión <b>{{ session_id }}</b></span>
             <span class="chip mono" id="clock">--:--:--</span>
             <button class="chip chip-btn" id="sound-btn" aria-pressed="false" title="Alerta sonora en eventos nuevos">
@@ -921,33 +921,34 @@
             </section>
         </div>
 
-        {% if "analitica" in perms %}
+        {% if "analitica" in perms or "analitica_propia" in perms %}
         <!-- =================== Analítica de datos =================== -->
         <div class="analytics" id="analitica">
             <div class="an-head glass reveal">
                 <div>
                     <h2 class="an-title">Analítica de datos</h2>
-                    <div class="an-sub">Proceso KDD sobre las lecturas guardadas de la sesión <b>{{ session_id }}</b></div>
+                    <div class="an-sub">Metodología CRISP-DM sobre las lecturas guardadas de la sesión <b>{{ session_id }}</b></div>
                 </div>
                 <div class="controls">
-                    <select id="session-select" aria-label="Sesión"></select>
+                    {% if "todas_sesiones" in perms %}<select id="session-select" aria-label="Sesión"></select>{% endif %}
                     <select id="window-select" aria-label="Ventana">
                         <option value="60">Ventana 1 min</option>
                         <option value="30">Ventana 30 s</option>
                         <option value="10">Ventana 10 s</option>
                     </select>
                     <button type="button" id="an-refresh">Recalcular</button>
-                    <a class="btn" id="csv-raw" href="#">Lecturas CSV</a>
-                    <a class="btn" id="csv-win" href="#">Dataset CSV</a>
+                    {% if "exportar" in perms %}<a class="btn" id="csv-raw" href="#">Lecturas CSV</a>
+                    <a class="btn" id="csv-win" href="#">Dataset CSV</a>{% endif %}
                 </div>
             </div>
 
             <div class="steps">
-                <div class="step"><a href="#calidad"><b>1 · Selección</b>lecturas de la sesión</a></div>
-                <div class="step"><a href="#calidad"><b>2 · Preprocesamiento</b>limpieza y calidad</a></div>
-                <div class="step"><a href="#descriptiva"><b>3 · Transformación</b>ventanas y variables</a></div>
-                <div class="step"><a href="#clustering"><b>4 · Minería</b>K-Means, árbol, anomalías</a></div>
-                <div class="step"><a href="#clasificacion"><b>5 · Evaluación</b>métricas y validación</a></div>
+                <div class="step"><a href="#crisp"><b>1 · Negocio</b>objetivo y criterios</a></div>
+                <div class="step"><a href="#calidad"><b>2 · Datos</b>calidad y descripción</a></div>
+                <div class="step"><a href="#descriptiva"><b>3 · Preparación</b>ventanas y variables</a></div>
+                <div class="step"><a href="#clustering"><b>4 · Modelado</b>K-Means, árbol, regresión</a></div>
+                <div class="step"><a href="#regresion"><b>5 · Evaluación</b>métricas y validación</a></div>
+                <div class="step"><a href="#crisp"><b>6 · Despliegue</b>uso y recomendaciones</a></div>
             </div>
 
             <div id="an-content"><div class="loading">Calculando analítica…</div></div>
@@ -1547,7 +1548,7 @@
             } catch { msg.textContent = "Error de conexión"; }
         });
 
-        {% if "analitica" in perms %}
+        {% if "analitica" in perms or "analitica_propia" in perms %}
         // =================== Analítica de datos ===================
         // Va dentro de una función para no mezclar sus variables con las del panel en vivo.
         (() => {
@@ -1778,6 +1779,89 @@
             });
         }
 
+        function renderCrisp(fases) {
+            if (!fases.length) return "";
+            return `<section class="an-panel glass" id="crisp">
+                <h2>Metodología CRISP-DM · resumen por fase</h2>
+                <p class="lead">Cada fase resume lo que se hizo y lo que salió con los datos de esta sesión. ✓ = en orden, ⚠ = algo a mejorar.</p>
+                <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${fases.map(f => `
+                    <div class="kpi" style="text-align:left">
+                        <div class="label">${f.estado === "ok" ? "✓" : "⚠"} Fase ${f.numero} · ${esc(f.fase)}</div>
+                        <div class="hint" style="margin:4px 0 6px"><i>${esc(f.pregunta)}</i></div>
+                        ${f.hallazgos.map(h => `<div class="hint" style="margin-top:4px">• ${esc(h)}</div>`).join("")}
+                    </div>`).join("")}
+                </div>
+            </section>`;
+        }
+
+        function coefTable(rows, logistic) {
+            return `<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Coeficiente (por 1 DE)</th>${logistic ? "<th>Odds ratio</th>" : ""}<th>Efecto</th></tr></thead><tbody>` +
+                rows.map(r => `<tr><td>${esc(r.variable)}</td><td>${n(r.coeficiente, 3)}</td>${logistic ? `<td>× ${n(r.odds_ratio, 2)}</td>` : ""}<td>${r.efecto === "aumenta" ? "↑ aumenta" : "↓ reduce"}</td></tr>`).join("") + `</tbody></table></div>`;
+        }
+
+        function renderRegression(g) {
+            if (!g.disponible) return `<section class="an-panel glass" id="regresion"><h2>4d · Regresión logística / lineal</h2><div class="empty">${esc(g.mensaje)}</div></section>`;
+            const L = g.logistica, R = g.lineal;
+            const elegido = g.modelo_elegido === "lineal" ? "Regresión lineal" : "Regresión logística";
+            let html = `<section class="an-panel glass" id="regresion">
+                <h2>4d · Regresión (modelo elegido: ${elegido})</h2>
+                <div class="warn" style="border-color:#38bdf8;color:inherit">${esc(g.motivo)}</div>`;
+            if (R.disponible) {
+                const m = R.metricas;
+                html += `<h3>Regresión lineal sobre el KSS ${g.modelo_elegido === "lineal" ? "(elegida)" : ""}</h3>
+                <div class="kpis">
+                    <div class="kpi"><div class="label">R² (prueba)</div><div class="value">${n(m.r2, 2)}</div><div class="hint">varianza del KSS explicada</div></div>
+                    <div class="kpi"><div class="label">MAE</div><div class="value">${n(m.mae, 2)}</div><div class="hint">puntos KSS de error (base: ${n(m.mae_modelo_base, 2)})</div></div>
+                    <div class="kpi"><div class="label">RMSE</div><div class="value">${n(m.rmse, 2)}</div></div>
+                    ${R.validacion_cruzada ? `<div class="kpi"><div class="label">R² validación cruzada</div><div class="value">${n(R.validacion_cruzada.r2_medio, 2)}</div><div class="hint">± ${n(R.validacion_cruzada.r2_desv, 2)} (${esc(R.validacion_cruzada.esquema)})</div></div>` : ""}
+                </div>
+                <div class="grid2"><div><h3>KSS real vs. predicho</h3><div class="chart-box"><canvas id="ch-lin"></canvas></div></div>
+                <div><h3>Coeficientes</h3>${coefTable(R.coeficientes, false)}</div></div>
+                <pre class="rules">${esc(R.ecuacion)}</pre>`;
+            } else {
+                html += `<h3>Regresión lineal</h3><div class="empty">${esc(R.mensaje)}</div>`;
+            }
+            if (L.disponible) {
+                const m = L.metricas, cm = L.matriz_confusion.valores;
+                html += `<h3>Regresión logística ${g.modelo_elegido === "logistica" ? "(elegida)" : "(complemento)"} · etiqueta: ${esc(L.fuente_etiqueta)}</h3>
+                ${L.advertencia ? `<div class="warn">${esc(L.advertencia)}</div>` : ""}
+                <div class="kpis">
+                    <div class="kpi"><div class="label">Exactitud</div><div class="value">${pct(m.exactitud)}</div><div class="hint">base: ${pct(m.exactitud_clasificador_base)}</div></div>
+                    <div class="kpi"><div class="label">Precisión</div><div class="value">${pct(m.precision)}</div></div>
+                    <div class="kpi"><div class="label">Recall</div><div class="value">${pct(m.recall)}</div></div>
+                    <div class="kpi"><div class="label">F1</div><div class="value">${n(m.f1, 3)}</div></div>
+                    <div class="kpi"><div class="label">AUC-ROC</div><div class="value">${n(m.auc, 3)}</div><div class="hint">0,5 = azar · 1 = perfecto</div></div>
+                </div>
+                <div class="grid2"><div><h3>Curva ROC (prueba)</h3><div class="chart-box"><canvas id="ch-roc"></canvas></div></div>
+                <div><h3>Coeficientes y odds ratio</h3>${coefTable(L.coeficientes, true)}
+                <p class="note">Odds ratio: cuánto se multiplican las probabilidades relativas de fatiga al subir esa variable una desviación estándar. Matriz de confusión (real × predicho): [[${cm[0]}], [${cm[1]}]]</p></div></div>
+                <pre class="rules">${esc(L.ecuacion)}</pre>`;
+            } else {
+                html += `<h3>Regresión logística</h3><div class="empty">${esc(L.mensaje)}</div>`;
+            }
+            return html + `</section>`;
+        }
+
+        function chartsRegression(g) {
+            if (!g.disponible) return;
+            if (g.lineal && g.lineal.disponible) chart("ch-lin", {
+                type: "scatter",
+                data: { datasets: [
+                    { label: "ventanas", data: g.lineal.real_vs_predicho.map(p => ({ x: p.real, y: p.predicho })), backgroundColor: C.azul + "aa", pointRadius: 3 },
+                    { label: "ideal", type: "line", data: [{ x: 1, y: 1 }, { x: 9, y: 9 }], borderColor: C.gris, borderDash: [5, 4], pointRadius: 0 },
+                ] },
+                options: { maintainAspectRatio: false, scales: { x: { min: 1, max: 9, title: { display: true, text: "KSS real" } }, y: { min: 1, max: 9, title: { display: true, text: "KSS predicho" } } } }
+            });
+            if (g.logistica && g.logistica.disponible && g.logistica.curva_roc.length) chart("ch-roc", {
+                type: "line",
+                data: { datasets: [
+                    { label: "modelo", data: g.logistica.curva_roc.map(p => ({ x: p.fpr, y: p.tpr })), borderColor: C.violeta, pointRadius: 0, stepped: true },
+                    { label: "azar", data: [{ x: 0, y: 0 }, { x: 1, y: 1 }], borderColor: C.gris, borderDash: [5, 4], pointRadius: 0 },
+                ] },
+                options: { maintainAspectRatio: false, scales: { x: { type: "linear", min: 0, max: 1, title: { display: true, text: "falsos positivos" } }, y: { min: 0, max: 1, title: { display: true, text: "verdaderos positivos" } } } }
+            });
+        }
+
         function renderAnomalies(a, params) {
             if (!a.disponible) return `<section class="an-panel glass" id="anomalias"><h2>4c · Detección de anomalías</h2><div class="empty">${esc(a.mensaje)}</div></section>`;
             const L = params.etiquetas_variables;
@@ -1791,26 +1875,29 @@
         }
 
         async function loadSessions() {
+            const sel = document.getElementById("session-select");
+            const ws = document.getElementById("window-select");
+            ws.value = VENTANA;
+            const go = () => { location.search = "?session_id=" + encodeURIComponent(sel ? sel.value : SESSION) + "&ventana=" + ws.value; };
+            ws.onchange = go;
+            if (!sel) return;   // sin "todas_sesiones" (conductor): solo su sesión
             try {
                 const r = await fetch("/sesiones").then(r => r.json());
-                const sel = document.getElementById("session-select");
                 const list = r.sesiones || [];
                 const total = list.reduce((a, s) => a + s.lecturas, 0);
                 if (SESSION !== "todas" && !list.some(s => s.session_id === SESSION)) list.unshift({ session_id: SESSION, lecturas: 0 });
                 list.unshift({ session_id: "todas", lecturas: total, etiqueta: "Todas las sesiones" });
                 sel.innerHTML = list.map(s => `<option value="${esc(s.session_id)}" ${s.session_id === SESSION ? "selected" : ""}>${esc(s.etiqueta || s.session_id)} (${s.lecturas} lecturas)</option>`).join("");
-                const ws = document.getElementById("window-select");
-                ws.value = VENTANA;
-                const go = () => { location.search = "?session_id=" + encodeURIComponent(sel.value) + "&ventana=" + ws.value; };
                 sel.onchange = go;
-                ws.onchange = go;
             } catch (e) { console.error(e); }
         }
 
         async function loadReport() {
             const q = "session_id=" + encodeURIComponent(SESSION) + "&ventana=" + encodeURIComponent(VENTANA);
-            document.getElementById("csv-raw").href = "/lecturas.csv?session_id=" + encodeURIComponent(SESSION);
-            document.getElementById("csv-win").href = "/analitica/dataset.csv?" + q;
+            if (document.getElementById("csv-raw")) {
+                document.getElementById("csv-raw").href = "/lecturas.csv?session_id=" + encodeURIComponent(SESSION);
+                document.getElementById("csv-win").href = "/analitica/dataset.csv?" + q;
+            }
             const box = document.getElementById("an-content");
             box.innerHTML = `<div class="loading">Calculando analítica…</div>`;
             try {
@@ -1820,11 +1907,13 @@
                     box.innerHTML = `<section class="an-panel glass"><div class="empty">${esc(r.mensaje)}<br><br>Deja los ESP32 enviando datos unos minutos y presiona <b>Recalcular</b>.</div></section>`;
                     return;
                 }
-                box.innerHTML = renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
-                    renderCluster(r.clustering, r.parametros) + renderClassify(r.clasificacion) + renderAnomalies(r.anomalias, r.parametros);
+                box.innerHTML = renderCrisp(r.crisp_dm || []) + renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
+                    renderCluster(r.clustering, r.parametros) + renderClassify(r.clasificacion) +
+                    renderRegression(r.regresion || { disponible: false, mensaje: "" }) + renderAnomalies(r.anomalias, r.parametros);
                 chartsDescriptive(r.descriptiva);
                 chartsCluster(r.clustering);
                 chartsClassify(r.clasificacion);
+                chartsRegression(r.regresion || {});
             } catch (e) {
                 console.error(e);
                 box.innerHTML = `<section class="an-panel glass"><div class="empty">No se pudo calcular la analítica. Revisa la consola del servidor.<br><span class="note">${esc(e.message)}</span></div></section>`;

@@ -15,8 +15,10 @@ Analítica de datos (ver app/analytics.py):
   GET  /lecturas               -> lecturas crudas recientes (JSON).
   GET  /lecturas.csv           -> todas las lecturas crudas de la sesión (CSV).
   GET  /analitica/dataset.csv  -> dataset transformado: una fila por ventana (CSV).
-  GET  /analitica/reporte      -> proceso KDD completo (calidad, descriptiva,
-                                  K-Means, árbol de decisión, anomalías).
+  GET  /analitica/reporte      -> proceso CRISP-DM completo (calidad, descriptiva,
+                                  K-Means, árbol de decisión, regresión
+                                  logística/lineal, anomalías y resumen por fase).
+  GET  /analitica/usuarios     -> indicadores de todos los usuarios / sesiones.
   POST /autoreporte            -> autoreporte de somnolencia KSS (1-9).
   GET  /analitica              -> redirige a la sección de analítica del panel (/).
 
@@ -26,6 +28,11 @@ Acceso (ver app/auth.py para los roles y permisos):
   GET/POST /cuenta/clave       -> cambio de la contraseña propia.
   GET  /usuarios               -> gestión de usuarios (solo administrador).
   /api/usuarios...             -> API JSON de esa gestión.
+
+App móvil (Flutter, carpeta mobile/): autenticación con token Bearer.
+  POST /api/login              -> {token, user, must_change_password}.
+  POST /api/cuenta/clave       -> cambia la contraseña y devuelve un token nuevo.
+  GET  /api/config             -> umbrales, roles y parámetros del panel.
 
 /frame y /pulso no usan login: se autentican con la cabecera X-Device-Key
 (DEVICE_API_KEY). El resto exige sesión iniciada y el permiso del endpoint.
@@ -276,11 +283,20 @@ def export_dataset(session_id: str = DEFAULT_SESSION_ID, ventana: int = analytic
     return _csv_response(df, f"dataset_ventanas_{session_id}_{ventana}s.csv")
 
 
-@app.get("/analitica/reporte", dependencies=[Depends(require("analitica"))])
-def analytics_report(session_id: str = DEFAULT_SESSION_ID, ventana: int = analytics.VENTANA_DEFECTO_S):
-    """Proceso KDD completo. session_id="todas" analiza todas las sesiones y,
-    con 3 o más personas, evalúa el árbol separando por persona."""
+@app.get("/analitica/reporte")
+def analytics_report(session_id: str | None = None, ventana: int = analytics.VENTANA_DEFECTO_S,
+                     user: User = Depends(auth.require_any("analitica", "analitica_propia"))):
+    """Proceso CRISP-DM completo. session_id="todas" analiza todas las sesiones y,
+    con 3 o más personas, evalúa los modelos separando por persona. Con solo
+    "analitica_propia" (conductor) se analiza siempre la sesión propia."""
+    session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
     return analytics.full_report(session_id, _check_window(ventana))
+
+
+@app.get("/analitica/usuarios", dependencies=[Depends(require("analitica")), Depends(require("todas_sesiones"))])
+def analytics_users():
+    """Panel de todos los usuarios: indicadores por persona / sesión para compararlas."""
+    return analytics.users_overview()
 
 
 @app.post("/autoreporte")
@@ -393,9 +409,8 @@ def password_page(request: Request, user: User = Depends(require(allow_password_
         "user": user, "error": None, "min_password": auth.MIN_PASSWORD_LENGTH})
 
 
-@app.post("/cuenta/clave", response_class=HTMLResponse)
-def change_password(request: Request, actual: str = Form(...), nueva: str = Form(...), confirmar: str = Form(...),
-                    user: User = Depends(require(allow_password_change=True))):
+def _apply_password_change(user: User, actual: str, nueva: str, confirmar: str) -> tuple[str | None, int]:
+    """Valida y guarda la nueva contraseña. Devuelve (error, nueva session_version)."""
     row = database.get_user(user.id)
     if not auth.verify_password(actual, row["password_hash"]):
         error = "La contraseña actual no es correcta"
@@ -406,11 +421,20 @@ def change_password(request: Request, actual: str = Form(...), nueva: str = Form
     else:
         error = auth.password_problem(nueva)
     if error:
-        return templates.TemplateResponse(request, "cambiar_clave.html", {
-            "user": user, "error": error, "min_password": auth.MIN_PASSWORD_LENGTH}, status_code=400)
+        return error, user.session_version
     new_version = user.session_version + 1   # cierra las demás sesiones abiertas
     database.update_user(user.id, password_hash=auth.hash_password(nueva),
                          must_change_password=False, session_version=new_version)
+    return None, new_version
+
+
+@app.post("/cuenta/clave", response_class=HTMLResponse)
+def change_password(request: Request, actual: str = Form(...), nueva: str = Form(...), confirmar: str = Form(...),
+                    user: User = Depends(require(allow_password_change=True))):
+    error, new_version = _apply_password_change(user, actual, nueva, confirmar)
+    if error:
+        return templates.TemplateResponse(request, "cambiar_clave.html", {
+            "user": user, "error": error, "min_password": auth.MIN_PASSWORD_LENGTH}, status_code=400)
     response = RedirectResponse("/", status_code=303)
     auth.set_session_cookie(response, request, user.id, new_version)
     return response
@@ -419,6 +443,75 @@ def change_password(request: Request, actual: str = Form(...), nueva: str = Form
 @app.get("/api/yo")
 def whoami(user: User = Depends(require(allow_password_change=True))):
     return user.public()
+
+
+# ---------------------------------------------------------------------------
+# API JSON para la app móvil (Flutter, carpeta mobile/)
+#
+# Mismo token firmado que la cookie, pero entregado en el cuerpo y enviado
+# después en `Authorization: Bearer <token>`. El resto de endpoints JSON
+# (/estado, /eventos, /analitica/..., /api/usuarios...) se usan tal cual.
+# ---------------------------------------------------------------------------
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class PasswordChangeIn(BaseModel):
+    actual: str
+    nueva: str
+    confirmar: str
+
+
+def _token_payload(user_row: dict, session_version: int) -> dict:
+    user = auth.User.from_row({**user_row, "session_version": session_version})
+    return {
+        "token": auth.issue_token(user.id, session_version),
+        "expires_in": auth.SESSION_TTL_SECONDS,
+        "must_change_password": user.must_change_password,
+        "user": user.public(),
+    }
+
+
+@app.post("/api/login")
+def api_login(request: Request, data: LoginIn):
+    username = data.username.strip().lower()
+    locked = auth.seconds_locked(request, username)
+    if locked:
+        raise HTTPException(status_code=429, detail=f"Demasiados intentos fallidos. Espera {max(1, round(locked / 60))} min e inténtalo de nuevo.")
+    row = auth.authenticate(request, username, data.password)
+    if row is None:
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+    return _token_payload(row, int(row["session_version"]))
+
+
+@app.post("/api/cuenta/clave")
+def api_change_password(data: PasswordChangeIn, user: User = Depends(require(allow_password_change=True))):
+    error, new_version = _apply_password_change(user, data.actual, data.nueva, data.confirmar)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    # El token anterior queda revocado (session_version subió): se entrega uno nuevo.
+    return _token_payload(database.get_user(user.id), new_version)
+
+
+@app.get("/api/config")
+def api_config(user: User = Depends(require(allow_password_change=True))):
+    """Umbrales y catálogo de roles que el panel web recibe incrustados en el HTML."""
+    return {
+        "thresholds": {
+            "ear": vision.EAR_THRESHOLD,
+            "mar": vision.MAR_THRESHOLD,
+            "head_tilt_deg": vision.HEAD_TILT_THRESHOLD_DEG,
+            "relative_drop": pulse.RELATIVE_DROP_THRESHOLD,
+            "low_variability_std": pulse.LOW_VARIABILITY_STD,
+        },
+        "roles": {k: {"label": v["label"], "descripcion": v["descripcion"], "permisos": sorted(v["permisos"])}
+                  for k, v in auth.ROLES.items()},
+        "permisos": auth.PERMISOS,
+        "min_password": auth.MIN_PASSWORD_LENGTH,
+        "ventana_defecto": analytics.VENTANA_DEFECTO_S,
+    }
 
 
 # ---------------------------------------------------------------------------

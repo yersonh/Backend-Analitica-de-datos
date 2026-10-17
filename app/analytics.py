@@ -1,24 +1,32 @@
 """
 Analítica / minería de datos para SIDFAM.
 
-Implementa el proceso KDD (y las fases 2-5 de CRISP-DM) sobre la tabla
-`sensor_readings`, que guarda CADA lectura recibida de los ESP32:
+Sigue la metodología CRISP-DM (el reporte incluye un resumen por fase en
+`crisp_dm`, ver crisp_dm_phases) sobre la tabla `sensor_readings`, que
+guarda CADA lectura recibida de los ESP32:
 
-  1. Selección        -> lecturas de una sesión (load_readings).
-  2. Preprocesamiento -> duplicados, nulos, lecturas implausibles,
-                         inconsistencias y valores atípicos (preprocess).
-  3. Transformación   -> integración de las dos fuentes (visión + pulso)
-                         en ventanas de tiempo fijas (1 minuto por defecto,
-                         como indica la metodología del documento) y
-                         extracción de características (build_windows).
-  4. Minería          -> descriptiva (describe), clustering K-Means
-                         (cluster), clasificación supervisada con árbol de
-                         decisión + comparación de modelos (classify) y
-                         detección de anomalías con Isolation Forest
-                         (anomalies).
-  5. Evaluación       -> silueta, matriz de confusión, precisión, recall,
-                         F1, validación cruzada y comparación contra un
-                         clasificador base.
+  1. Comprensión del negocio -> objetivo y criterios de éxito
+                                (CRITERIO_RECALL / CRITERIO_PRECISION).
+  2. Comprensión de los datos -> lecturas de una sesión (load_readings),
+                                calidad y análisis descriptivo (describe).
+  3. Preparación de los datos -> duplicados, nulos, lecturas implausibles,
+                                inconsistencias y atípicos (preprocess);
+                                integración visión + pulso en ventanas de
+                                tiempo (1 minuto por defecto) y extracción de
+                                características (build_windows).
+  4. Modelado                -> clustering K-Means (cluster), árbol de
+                                decisión + comparación de modelos (classify),
+                                regresión logística o lineal según la variable
+                                objetivo disponible (regression) y detección
+                                de anomalías con Isolation Forest (anomalies).
+  5. Evaluación              -> silueta, matriz de confusión, precisión,
+                                recall, F1, AUC, R², MAE, validación cruzada y
+                                comparación contra modelos base.
+  6. Despliegue              -> reglas de fusion.py en tiempo real, panel web
+                                y app móvil; recomendaciones derivadas de los
+                                resultados.
+
+users_overview() resume cada usuario / sesión para el panel del administrador.
 
 Sesiones y personas: el session_id se escribe como "persona_prueba"
 (p. ej. "lauren_1", "lauren_2"). La parte antes del primer "_" identifica a
@@ -51,12 +59,14 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import IsolationForest, RandomForestClassifier
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import (
     accuracy_score, adjusted_rand_score, confusion_matrix, f1_score,
-    precision_score, recall_score, silhouette_score,
+    mean_absolute_error, mean_squared_error, precision_score, r2_score,
+    recall_score, roc_auc_score, roc_curve, silhouette_score,
 )
 from sklearn.model_selection import (
-    GroupKFold, GroupShuffleSplit, StratifiedKFold, cross_val_score, train_test_split,
+    GroupKFold, GroupShuffleSplit, KFold, StratifiedKFold, cross_val_score, train_test_split,
 )
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
@@ -80,6 +90,13 @@ KSS_MAX_AGE = timedelta(minutes=10)  # un autoreporte etiqueta las ventanas de l
 PLAUSIBLE_BPM = (30, 220)      # mismo rango que pulse.py
 IQR_K = 3.0                    # factor IQR para atípicos (3 = solo atípicos extremos)
 RANDOM_STATE = 42
+# Criterios de éxito (CRISP-DM fase 1). Propuestos para un sistema de
+# seguridad: perder fatiga real es peor que una falsa alarma, por eso se exige
+# más recall que precisión. Ajústenlos con el documento del proyecto.
+CRITERIO_RECALL = 0.80
+CRITERIO_PRECISION = 0.70
+MIN_KSS_NIVELES_LINEAL = 3     # valores distintos de KSS para tratarlo como variable continua
+MIN_R2_LINEAL = 0.10           # por debajo, la regresión lineal no explica lo suficiente
 
 FEATURES = [
     "ear_mean",       # apertura media del ojo
@@ -466,65 +483,89 @@ def cluster(w: pd.DataFrame) -> dict:
 # 4c. Clasificación (supervisado): árbol de decisión + comparación
 # ---------------------------------------------------------------------------
 
-def classify(w: pd.DataFrame) -> dict:
-    wc = _complete(w)
-
+def _binary_target(wc: pd.DataFrame) -> tuple[pd.DataFrame, str, str, str | None]:
+    """Variable objetivo binaria (fatiga sí/no): KSS real si hay suficientes
+    autoreportes con ambas clases; si no, el estado de la fusión por reglas.
+    Devuelve (datos, columna, descripción, advertencia)."""
     labeled_kss = wc.dropna(subset=["somnoliento_kss"])
     if len(labeled_kss) >= MIN_WINDOWS_CLASSIFY and labeled_kss["somnoliento_kss"].nunique() == 2:
-        data, target = labeled_kss, "somnoliento_kss"
-        fuente = "autoreporte KSS (etiqueta real: KSS >= 7 = somnoliento)"
-        advertencia = None
-    else:
-        data, target = wc, "fatiga_regla"
-        fuente = "estado de la fusión por reglas (status = alerta)"
-        advertencia = (
-            "No hay suficientes autoreportes KSS, así que la etiqueta sale de las mismas reglas "
-            "de fusion.py. El árbol reaprende esas reglas: es útil para ver qué variables pesan "
-            "y obtener reglas legibles, pero no es una validación independiente. Registren "
-            "autoreportes KSS durante las pruebas (POST /autoreporte) para evaluar de verdad."
-        )
+        return labeled_kss, "somnoliento_kss", "autoreporte KSS (etiqueta real: KSS >= 7 = somnoliento)", None
+    return wc, "fatiga_regla", "estado de la fusión por reglas (status = alerta)", (
+        "No hay suficientes autoreportes KSS, así que la etiqueta sale de las mismas reglas "
+        "de fusion.py. El modelo reaprende esas reglas: es útil para ver qué variables pesan "
+        "y obtener reglas legibles, pero no es una validación independiente. Registren "
+        "autoreportes KSS durante las pruebas (POST /autoreporte) para evaluar de verdad."
+    )
 
+
+def _check_classes(data: pd.DataFrame, target: str, fuente: str) -> dict | None:
+    """None si hay datos suficientes para un modelo binario; si no, el motivo."""
     if len(data) < MIN_WINDOWS_CLASSIFY:
         return _insufficient(
             f"Se necesitan al menos {MIN_WINDOWS_CLASSIFY} ventanas etiquetadas (hay {len(data)}).",
             fuente_etiqueta=fuente,
         )
-    y = data[target].astype(int).values
-    counts = np.bincount(y, minlength=2)
+    counts = np.bincount(data[target].astype(int).values, minlength=2)
     if counts.min() < 4:
         return _insufficient(
             "Las dos clases (fatiga / no fatiga) necesitan al menos 4 ventanas cada una "
             f"(hay {int(counts[0])} sin fatiga y {int(counts[1])} con fatiga).",
             fuente_etiqueta=fuente,
         )
+    return None
 
-    X = data[FEATURES].values
-    groups = data["persona"].values
+
+def _split(X, y, groups, stratify: bool = True):
+    """Partición entrenamiento / prueba. Con >= 3 personas se separa POR
+    PERSONA (nadie aparece en los dos conjuntos); si no, partición aleatoria
+    (estratificada en clasificación), que es más optimista y así se informa.
+    Devuelve (X_tr, X_te, y_tr, y_te, descripción)."""
     n_personas = len(set(groups))
-
-    # Partición entrenamiento / prueba. Con >= 3 personas se separa POR
-    # PERSONA (nadie aparece en los dos conjuntos); si no, partición
-    # aleatoria estratificada, que es más optimista y así se informa.
-    particion = None
     if n_personas >= MIN_PERSONAS_GRUPOS:
         for seed in range(20):   # busca una partición con ambas clases en prueba
             gss = GroupShuffleSplit(n_splits=1, test_size=0.3, random_state=RANDOM_STATE + seed)
             tr, te = next(gss.split(X, y, groups))
-            if len(set(y[te])) == 2 and len(set(y[tr])) == 2:
-                particion = (tr, te)
-                break
-    if particion is not None:
-        tr, te = particion
-        X_tr, X_te, y_tr, y_te = X[tr], X[te], y[tr], y[te]
-        tipo_particion = (f"por persona ({n_personas} personas; las de prueba no se usaron "
-                          f"para entrenar: {', '.join(sorted(set(groups[te])))})")
-    else:
-        X_tr, X_te, y_tr, y_te = train_test_split(
-            X, y, test_size=0.3, stratify=y, random_state=RANDOM_STATE
-        )
-        tipo_particion = (f"aleatoria estratificada 70/30 ({n_personas} persona(s)). Ventanas "
-                          "seguidas de la misma persona se parecen mucho, así que estas métricas "
-                          f"son optimistas; con {MIN_PERSONAS_GRUPOS} o más personas se separa por persona.")
+            if not stratify or (len(set(y[te])) == 2 and len(set(y[tr])) == 2):
+                return (X[tr], X[te], y[tr], y[te],
+                        f"por persona ({n_personas} personas; las de prueba no se usaron "
+                        f"para entrenar: {', '.join(sorted(set(groups[te])))})")
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X, y, test_size=0.3, stratify=y if stratify else None, random_state=RANDOM_STATE
+    )
+    return (X_tr, X_te, y_tr, y_te,
+            f"aleatoria{' estratificada' if stratify else ''} 70/30 ({n_personas} persona(s)). Ventanas "
+            "seguidas de la misma persona se parecen mucho, así que estas métricas son optimistas; "
+            f"con {MIN_PERSONAS_GRUPOS} o más personas se separa por persona.")
+
+
+def _cv(groups, y=None, classification: bool = True):
+    """Esquema de validación cruzada coherente con _split. Devuelve (cv, n_splits, nombre, usa_grupos)."""
+    n_personas = len(set(groups))
+    if n_personas >= MIN_PERSONAS_GRUPOS:
+        n = int(min(5, n_personas))
+        return GroupKFold(n_splits=n), n, "GroupKFold por persona", True
+    if classification:
+        n = int(min(5, np.bincount(y, minlength=2).min()))
+        if n < 2:
+            return None, n, "StratifiedKFold", False
+        return StratifiedKFold(n_splits=n, shuffle=True, random_state=RANDOM_STATE), n, "StratifiedKFold", False
+    n = int(min(5, len(groups) // 5))
+    if n < 2:
+        return None, n, "KFold", False
+    return KFold(n_splits=n, shuffle=True, random_state=RANDOM_STATE), n, "KFold", False
+
+
+def classify(w: pd.DataFrame) -> dict:
+    wc = _complete(w)
+    data, target, fuente, advertencia = _binary_target(wc)
+    if (falta := _check_classes(data, target, fuente)) is not None:
+        return falta
+
+    y = data[target].astype(int).values
+    counts = np.bincount(y, minlength=2)
+    X = data[FEATURES].values
+    groups = data["persona"].values
+    X_tr, X_te, y_tr, y_te, tipo_particion = _split(X, y, groups)
 
     tree = DecisionTreeClassifier(max_depth=4, min_samples_leaf=3,
                                   class_weight="balanced", random_state=RANDOM_STATE)
@@ -542,13 +583,10 @@ def classify(w: pd.DataFrame) -> dict:
     base = DummyClassifier(strategy="most_frequent").fit(X_tr, y_tr)
     metrics["exactitud_clasificador_base"] = accuracy_score(y_te, base.predict(X_te))
 
-    # Comparación de algoritmos con validación cruzada estratificada (F1)
-    use_groups = n_personas >= MIN_PERSONAS_GRUPOS
-    n_splits = int(min(5, n_personas)) if use_groups else int(min(5, counts.min()))
+    # Comparación de algoritmos con validación cruzada (F1)
+    cv, n_splits, cv_nombre, use_groups = _cv(groups, y)
     comparacion = []
-    if n_splits >= 2:
-        cv = GroupKFold(n_splits=n_splits) if use_groups else \
-            StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=RANDOM_STATE)
+    if cv is not None:
         modelos = {
             "Árbol de decisión": DecisionTreeClassifier(max_depth=4, min_samples_leaf=3,
                                                         class_weight="balanced",
@@ -559,6 +597,8 @@ def classify(w: pd.DataFrame) -> dict:
             "KNN (k=5)": make_pipeline(StandardScaler(),
                                        KNeighborsClassifier(n_neighbors=min(5, max(1, len(X) // 4)))),
             "Naive Bayes": make_pipeline(StandardScaler(), GaussianNB()),
+            "Regresión logística": make_pipeline(StandardScaler(), LogisticRegression(
+                class_weight="balanced", max_iter=2000)),
         }
         for nombre, m in modelos.items():
             scores = cross_val_score(m, X, y, cv=cv, scoring="f1",
@@ -580,7 +620,7 @@ def classify(w: pd.DataFrame) -> dict:
         "fuente_etiqueta": fuente,
         "advertencia": advertencia,
         "particion": tipo_particion,
-        "validacion_cruzada": "GroupKFold por persona" if use_groups else "StratifiedKFold",
+        "validacion_cruzada": cv_nombre,
         "n_entrenamiento": len(y_tr),
         "n_prueba": len(y_te),
         "clases": {"sin_fatiga": int(counts[0]), "fatiga": int(counts[1])},
@@ -594,7 +634,180 @@ def classify(w: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 4d. Detección de anomalías: Isolation Forest
+# 4d. Regresión: logística (objetivo binario) o lineal (objetivo continuo)
+# ---------------------------------------------------------------------------
+
+def _coefs(model, intercept_label: str) -> tuple[list[dict], str]:
+    """Coeficientes estandarizados (por 1 desviación estándar de cada variable),
+    ordenados por magnitud, y la ecuación legible."""
+    coef = np.ravel(model.coef_)
+    b0 = float(np.ravel(model.intercept_)[0]) if np.ndim(model.intercept_) else float(model.intercept_)
+    filas = sorted(
+        ({"variable": FEATURE_LABELS[f], "clave": f, "coeficiente": c,
+          "efecto": "aumenta" if c > 0 else "reduce"} for f, c in zip(FEATURES, coef)),
+        key=lambda r: abs(r["coeficiente"]), reverse=True,
+    )
+    terms = " ".join(f"{'+' if r['coeficiente'] >= 0 else '−'} {abs(r['coeficiente']):.3f}·z({r['variable']})"
+                     for r in filas)
+    return filas, f"{intercept_label} = {b0:.3f} {terms}"
+
+
+def _logistic(data: pd.DataFrame, target: str, fuente: str, advertencia: str | None) -> dict:
+    if (falta := _check_classes(data, target, fuente)) is not None:
+        return falta
+    X = data[FEATURES].values
+    y = data[target].astype(int).values
+    groups = data["persona"].values
+    X_tr, X_te, y_tr, y_te, particion = _split(X, y, groups)
+
+    model = make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=2000))
+    model.fit(X_tr, y_tr)
+    proba = model.predict_proba(X_te)[:, 1]
+    pred = (proba >= 0.5).astype(int)
+    two_classes = len(set(y_te)) == 2
+
+    metricas = {
+        "exactitud": accuracy_score(y_te, pred),
+        "precision": precision_score(y_te, pred, zero_division=0),
+        "recall": recall_score(y_te, pred, zero_division=0),
+        "f1": f1_score(y_te, pred, zero_division=0),
+        "auc": roc_auc_score(y_te, proba) if two_classes else None,
+        "exactitud_clasificador_base": accuracy_score(
+            y_te, DummyClassifier(strategy="most_frequent").fit(X_tr, y_tr).predict(X_te)),
+    }
+    roc = []
+    if two_classes:
+        fpr, tpr, _ = roc_curve(y_te, proba)
+        idx = np.unique(np.linspace(0, len(fpr) - 1, min(len(fpr), 60)).astype(int))
+        roc = [{"fpr": fpr[i], "tpr": tpr[i]} for i in idx]
+
+    cv, n_splits, cv_nombre, use_groups = _cv(groups, y)
+    cv_res = None
+    if cv is not None:
+        g = groups if use_groups else None
+        f1s = cross_val_score(model, X, y, cv=cv, scoring="f1", groups=g)
+        aucs = cross_val_score(model, X, y, cv=cv, scoring="roc_auc", groups=g)
+        cv_res = {"esquema": cv_nombre, "particiones": n_splits,
+                  "f1_medio": f1s.mean(), "f1_desv": f1s.std(),
+                  "auc_medio": np.nanmean(aucs), "auc_desv": np.nanstd(aucs)}
+
+    filas, ecuacion = _coefs(model[-1], "logit(p fatiga)")
+    for r in filas:
+        r["odds_ratio"] = math.exp(r["coeficiente"])   # multiplicador de las odds por +1 DE
+
+    return {
+        "disponible": True,
+        "algoritmo": "Regresión logística (variables estandarizadas, clases balanceadas)",
+        "objetivo": "probabilidad de que la ventana sea fatiga",
+        "fuente_etiqueta": fuente,
+        "advertencia": advertencia,
+        "particion": particion,
+        "n_entrenamiento": len(y_tr),
+        "n_prueba": len(y_te),
+        "clases": {"sin_fatiga": int((y == 0).sum()), "fatiga": int((y == 1).sum())},
+        "metricas": metricas,
+        "matriz_confusion": {"etiquetas": ["sin fatiga", "fatiga"],
+                             "valores": confusion_matrix(y_te, pred, labels=[0, 1]).tolist()},
+        "curva_roc": roc,
+        "validacion_cruzada": cv_res,
+        "coeficientes": filas,
+        "intercepto": float(model[-1].intercept_[0]),
+        "ecuacion": ecuacion,
+    }
+
+
+def _linear(data: pd.DataFrame) -> dict:
+    X = data[FEATURES].values
+    y = data["kss"].astype(float).values
+    groups = data["persona"].values
+    X_tr, X_te, y_tr, y_te, particion = _split(X, y, groups, stratify=False)
+
+    model = make_pipeline(StandardScaler(), LinearRegression()).fit(X_tr, y_tr)
+    pred = np.clip(model.predict(X_te), 1, 9)
+    base = np.full_like(y_te, y_tr.mean())
+
+    cv, n_splits, cv_nombre, use_groups = _cv(groups, classification=False)
+    cv_res = None
+    if cv is not None:
+        r2s = cross_val_score(model, X, y, cv=cv, scoring="r2", groups=groups if use_groups else None)
+        cv_res = {"esquema": cv_nombre, "particiones": n_splits, "r2_medio": r2s.mean(), "r2_desv": r2s.std()}
+
+    filas, ecuacion = _coefs(model[-1], "KSS estimado")
+    return {
+        "disponible": True,
+        "algoritmo": "Regresión lineal por mínimos cuadrados (variables estandarizadas)",
+        "objetivo": "nivel de somnolencia KSS (1 = muy alerta … 9 = luchando contra el sueño)",
+        "particion": particion,
+        "n_entrenamiento": len(y_tr),
+        "n_prueba": len(y_te),
+        "metricas": {
+            "r2": r2_score(y_te, pred) if len(y_te) > 1 else None,
+            "mae": mean_absolute_error(y_te, pred),
+            "rmse": math.sqrt(mean_squared_error(y_te, pred)),
+            "mae_modelo_base": mean_absolute_error(y_te, base),
+        },
+        "validacion_cruzada": cv_res,
+        "coeficientes": filas,
+        "intercepto": float(model[-1].intercept_),
+        "ecuacion": ecuacion,
+        "real_vs_predicho": [{"real": r, "predicho": p} for r, p in list(zip(y_te, pred))[:300]],
+    }
+
+
+def regression(w: pd.DataFrame) -> dict:
+    """Ajusta el tipo de regresión adecuado a la variable objetivo disponible:
+
+    - Lineal, si hay suficientes ventanas con autoreporte KSS y este toma
+      varios valores: la escala 1-9 es numérica y ordenada, y estimarla
+      conserva más información que reducirla a sí/no.
+    - Logística, si el objetivo es binario (fatiga sí/no). Una regresión lineal
+      sobre 0/1 predice valores fuera de [0, 1] y sus residuos no cumplen los
+      supuestos; la logística modela directamente la probabilidad.
+
+    Se calculan las dos cuando es posible y `modelo_elegido` indica cuál
+    conviene, con el motivo.
+    """
+    wc = _complete(w)
+    data, target, fuente, advertencia = _binary_target(wc)
+    logistica = _logistic(data, target, fuente, advertencia)
+
+    kss = wc.dropna(subset=["kss"])
+    niveles = int(kss["kss"].nunique()) if not kss.empty else 0
+    if len(kss) >= MIN_WINDOWS_CLASSIFY and niveles >= MIN_KSS_NIVELES_LINEAL:
+        lineal = _linear(kss)
+    else:
+        lineal = _insufficient(
+            f"La regresión lineal necesita una variable objetivo continua: el KSS con al menos "
+            f"{MIN_WINDOWS_CLASSIFY} ventanas etiquetadas y {MIN_KSS_NIVELES_LINEAL} niveles distintos "
+            f"(hay {len(kss)} ventanas con KSS y {niveles} niveles). Registren autoreportes KSS."
+        )
+
+    r2 = lineal.get("metricas", {}).get("r2") if lineal["disponible"] else None
+    if lineal["disponible"] and r2 is not None and r2 >= MIN_R2_LINEAL:
+        elegido = "lineal"
+        motivo = (f"Hay {len(kss)} ventanas con autoreporte KSS en {niveles} niveles distintos: la variable "
+                  f"objetivo es numérica y ordenada, así que la regresión lineal estima el nivel de "
+                  f"somnolencia sin perder información (R² en prueba = {r2:.2f}). La logística se muestra "
+                  f"como complemento para el umbral KSS ≥ {KSS_SOMNOLIENTO}.")
+    elif logistica["disponible"]:
+        elegido = "logistica"
+        motivo = ("La variable objetivo disponible es binaria (fatiga / sin fatiga, según "
+                  f"{fuente}). La regresión logística modela la probabilidad de fatiga, acotada entre 0 y 1; "
+                  "una regresión lineal sobre 0/1 daría valores imposibles y residuos que violan sus supuestos.")
+        if lineal["disponible"]:
+            motivo += (f" La regresión lineal sobre el KSS se calculó pero explica poco "
+                       f"(R² = {r2 if r2 is not None else 0:.2f} < {MIN_R2_LINEAL}).")
+    else:
+        return _insufficient(
+            "Todavía no hay datos suficientes para ninguna regresión. " + logistica.get("mensaje", ""),
+            logistica=logistica, lineal=lineal,
+        )
+    return {"disponible": True, "modelo_elegido": elegido, "motivo": motivo,
+            "logistica": logistica, "lineal": lineal}
+
+
+# ---------------------------------------------------------------------------
+# 4e. Detección de anomalías: Isolation Forest
 # ---------------------------------------------------------------------------
 
 def anomalies(w: pd.DataFrame, contamination: float = 0.05) -> dict:
@@ -643,17 +856,234 @@ def full_report(session_id: str, ventana_s: int = VENTANA_DEFECTO_S) -> dict:
     w = build_windows(clean, ventana_s)
     quality["sesiones"] = int(df["session_id"].nunique())
     quality["personas"] = int(df["session_id"].map(persona_de).nunique())
+    quality["desde"] = df["timestamp"].min()
+    quality["hasta"] = df["timestamp"].max()
+    quality["autoreportes_kss"] = len(database.list_self_reports(
+        session_id=None if session_id == TODAS else session_id))
+    quality["ventanas_con_kss"] = int(w["kss"].notna().sum()) if "kss" in w else 0
 
-    return _clean({
+    report = {
         "session_id": session_id,
         "disponible": True,
+        "metodologia": "CRISP-DM",
         "parametros": {"ventana_s": int(ventana_s), "variables": FEATURES,
-                       "etiquetas_variables": FEATURE_LABELS},
+                       "etiquetas_variables": FEATURE_LABELS,
+                       "criterios_exito": {"recall": CRITERIO_RECALL, "precision": CRITERIO_PRECISION}},
         "calidad_datos": quality,
         "descriptiva": describe(w, session_id),
         "clustering": cluster(w),
         "clasificacion": classify(w),
+        "regresion": regression(w),
         "anomalias": anomalies(w),
+    }
+    report["crisp_dm"] = crisp_dm_phases(report)
+    return _clean(report)
+
+
+# ---------------------------------------------------------------------------
+# Resumen CRISP-DM
+# ---------------------------------------------------------------------------
+
+def _pct(v) -> str:
+    return "—" if v is None else f"{100 * v:.0f} %"
+
+
+def crisp_dm_phases(r: dict) -> list[dict]:
+    """Las 6 fases de CRISP-DM con lo que se hizo y lo que salió en ESTE
+    conjunto de datos. `estado`: "ok" o "atencion" (algo a mejorar)."""
+    q, d = r["calidad_datos"], r["descriptiva"]
+    clus, clas, reg, anom = r["clustering"], r["clasificacion"], r["regresion"], r["anomalias"]
+    ventana = r["parametros"]["ventana_s"]
+
+    # Mejor modelo supervisado disponible, para contrastar con los criterios de éxito
+    candidatos = []
+    if clas.get("disponible"):
+        candidatos.append(("Árbol de decisión", clas["metricas"]))
+    if reg.get("disponible") and reg["logistica"].get("disponible"):
+        candidatos.append(("Regresión logística", reg["logistica"]["metricas"]))
+    mejor = max(candidatos, key=lambda c: c[1]["f1"]) if candidatos else None
+    cumple = bool(mejor and mejor[1]["recall"] >= CRITERIO_RECALL and mejor[1]["precision"] >= CRITERIO_PRECISION)
+    etiqueta_real = bool(clas.get("disponible") and clas.get("advertencia") is None)
+
+    fases = [
+        {
+            "numero": 1, "fase": "Comprensión del negocio",
+            "pregunta": "¿Qué problema se resuelve y cómo se mide el éxito?",
+            "hallazgos": [
+                "Objetivo: detectar a tiempo la fatiga del conductor combinando la señal visual (cámara) y la "
+                "fisiológica (pulso), y alertar antes de un incidente.",
+                f"Criterio de éxito propuesto: recall ≥ {_pct(CRITERIO_RECALL)} (no dejar pasar fatiga real) y "
+                f"precisión ≥ {_pct(CRITERIO_PRECISION)} (pocas falsas alarmas).",
+                "Restricción: un evento de fatiga exige evidencia de los dos canales a la vez (RF05).",
+            ],
+            "estado": "ok",
+        },
+        {
+            "numero": 2, "fase": "Comprensión de los datos",
+            "pregunta": "¿Qué datos hay y qué calidad tienen?",
+            "hallazgos": [
+                f"{q['registros_iniciales']} lecturas: {q['lecturas_frame']} de cámara y {q['lecturas_pulso']} de "
+                f"pulso, de {q['sesiones']} sesión(es) y {q['personas']} persona(s).",
+                f"Frames sin rostro: {q['pct_frames_sin_rostro']} %. Pulsos implausibles: {q['bpm_implausibles']}. "
+                f"Pérdidas de comunicación: {q['perdidas_comunicacion']}.",
+                f"Autoreportes KSS: {q.get('autoreportes_kss', 0)} (cubren {q.get('ventanas_con_kss', 0)} "
+                f"ventanas; cada uno etiqueta los {int(KSS_MAX_AGE.total_seconds() // 60)} min siguientes).",
+            ],
+            "estado": "atencion" if q["pct_frames_sin_rostro"] > 30 or q.get("autoreportes_kss", 0) == 0 else "ok",
+        },
+        {
+            "numero": 3, "fase": "Preparación de los datos",
+            "pregunta": "¿Cómo se limpian e integran las dos fuentes?",
+            "hallazgos": [
+                f"Limpieza: {q['duplicados_eliminados']} duplicados eliminados, {q['bpm_implausibles']} BPM "
+                f"implausibles y {sum((q.get('atipicos_eliminados') or {}).values())} atípicos pasados a nulo.",
+                f"Integración: lecturas agrupadas en ventanas de {ventana} s con 8 variables (EAR medio, PERCLOS, "
+                "MAR máximo, bostezos, inclinación, BPM medio, desviación y caída vs. basal).",
+                f"Resultado: {d['ventanas_totales']} ventanas, {d['ventanas_completas']} completas para modelar.",
+            ],
+            "estado": "ok" if d["ventanas_completas"] >= MIN_WINDOWS_CLASSIFY else "atencion",
+        },
+        {
+            "numero": 4, "fase": "Modelado",
+            "pregunta": "¿Qué técnicas se aplicaron?",
+            "hallazgos": [
+                f"No supervisado: K-Means con k = {clus['k']} (silueta {clus['silueta']:.2f})." if clus.get("disponible")
+                else f"K-Means: {clus.get('mensaje')}",
+                f"Supervisado: árbol de decisión (profundidad 4) comparado con Random Forest, KNN, Naive Bayes "
+                f"y regresión logística." if clas.get("disponible") else f"Árbol de decisión: {clas.get('mensaje')}",
+                (f"Regresión elegida: {'lineal sobre el KSS' if reg['modelo_elegido'] == 'lineal' else 'logística'}. "
+                 f"{reg['motivo']}") if reg.get("disponible") else f"Regresión: {reg.get('mensaje')}",
+                f"Anomalías: Isolation Forest marcó {anom['anomalias_detectadas']} de {anom['ventanas_analizadas']} "
+                "ventanas." if anom.get("disponible") else f"Anomalías: {anom.get('mensaje')}",
+            ],
+            "estado": "ok" if clas.get("disponible") and reg.get("disponible") else "atencion",
+        },
+        {
+            "numero": 5, "fase": "Evaluación",
+            "pregunta": "¿Los modelos cumplen el objetivo del negocio?",
+            "hallazgos": (
+                [f"Mejor modelo supervisado: {mejor[0]} — recall {_pct(mejor[1]['recall'])}, "
+                 f"precisión {_pct(mejor[1]['precision'])}, F1 {mejor[1]['f1']:.2f}.",
+                 ("Cumple los criterios de éxito." if cumple else "Todavía NO cumple los criterios de éxito.")]
+                if mejor else ["Aún no hay modelos supervisados evaluables con estos datos."]
+            ) + [
+                "Etiqueta real (KSS): la evaluación es independiente de las reglas." if etiqueta_real else
+                "La etiqueta sale de las reglas de fusión: las métricas miden cuánto se reproducen las reglas, "
+                "no la fatiga real. Hace falta registrar KSS.",
+                clas.get("particion", "") and f"Partición: {clas['particion']}",
+            ],
+            "estado": "ok" if cumple and etiqueta_real else "atencion",
+        },
+        {
+            "numero": 6, "fase": "Despliegue",
+            "pregunta": "¿Cómo se usa el resultado?",
+            "hallazgos": [
+                "En producción: las reglas de fusion.py evalúan cada frame y pulso en tiempo real; las alertas "
+                "llegan al panel web y a la app móvil, y cada episodio queda registrado.",
+                "Esta analítica se recalcula a demanda desde la app o el panel para seguir a cada conductor.",
+            ] + _recomendaciones(q, clas, reg, cumple, etiqueta_real),
+            "estado": "ok",
+        },
+    ]
+    for f in fases:
+        f["hallazgos"] = [h for h in f["hallazgos"] if h]
+    return fases
+
+
+def _recomendaciones(q, clas, reg, cumple, etiqueta_real) -> list[str]:
+    rec = []
+    if not etiqueta_real:
+        rec.append("Recomendación: registrar el KSS cada 5 min durante las pruebas para tener una etiqueta real.")
+    if q["personas"] < MIN_PERSONAS_GRUPOS:
+        rec.append(f"Recomendación: probar con al menos {MIN_PERSONAS_GRUPOS} personas para validar separando por persona.")
+    if q["pct_frames_sin_rostro"] > 30:
+        rec.append("Recomendación: mejorar el encuadre o la iluminación de la cámara (muchos frames sin rostro).")
+    if cumple and etiqueta_real:
+        rec.append("Los umbrales del modelo pueden pasarse a fusion.py y validarse en carretera.")
+    elif clas.get("disponible") and not cumple:
+        rec.append("Recomendación: recalibrar umbrales (vision.py / pulse.py) y recoger más episodios de fatiga.")
+    return rec
+
+
+# ---------------------------------------------------------------------------
+# Panel de todos los usuarios (administrador / supervisor)
+# ---------------------------------------------------------------------------
+
+def users_overview() -> dict:
+    """Una fila por sesión monitoreada (y por conductor aunque aún no tenga
+    datos), con sus indicadores principales para comparar personas."""
+    users = database.list_users()
+    by_session = {u["session_id"]: u for u in users if u.get("session_id")}
+    df = load_readings(TODAS)
+    events = pd.DataFrame(database.list_events(session_id=None, limit=1_000_000))
+    reports = pd.DataFrame(database.list_self_reports(session_id=None))
+
+    filas = []
+    sesiones = sorted(set(df["session_id"]) if not df.empty else set())
+    for sid in sesiones:
+        g = df[df["session_id"] == sid].sort_values("timestamp")
+        frames = g[(g["source"] == "frame") & (g["face_detected"].fillna(0) == 1)]
+        pulses = g[(g["source"] == "pulso") & g["bpm"].between(*PLAUSIBLE_BPM)]
+        gaps = g["timestamp"].diff().dt.total_seconds()
+        horas = float(gaps[gaps <= GAP_FIN_SESION_S].sum()) / 3600
+        ev = events[events["session_id"] == sid] if not events.empty else events
+        fatiga = ev[ev["sensor_warning"].astype(int) == 0] if not ev.empty else ev
+        kss = reports[reports["session_id"] == sid]["kss"] if not reports.empty else pd.Series(dtype=float)
+        estados = g["fusion_status"].value_counts(normalize=True)
+        por_hora = len(fatiga) / horas if horas > 0 else 0.0
+        nivel = "alto" if por_hora >= 2 or (not fatiga.empty and (fatiga["risk_level"] == "alto").any()) \
+            else ("medio" if len(fatiga) > 0 or estados.get("vigilancia", 0) > 0.2 else "bajo")
+        u = by_session.get(sid)
+        filas.append({
+            "session_id": sid,
+            "persona": persona_de(sid),
+            "usuario": u["username"] if u else None,
+            "nombre": (u.get("full_name") or u["username"]) if u else None,
+            "rol": u["role"] if u else None,
+            "activo": bool(u["active"]) if u else None,
+            "lecturas": int(len(g)),
+            "desde": g["timestamp"].min(),
+            "hasta": g["timestamp"].max(),
+            "horas_monitoreo": horas,
+            "bpm_medio": pulses["bpm"].mean() if not pulses.empty else None,
+            "basal_bpm": g["baseline_bpm"].dropna().iloc[-1] if g["baseline_bpm"].notna().any() else None,
+            "ear_medio": frames["ear"].mean() if not frames.empty else None,
+            "perclos": frames["eyes_closed"].mean() * 100 if not frames.empty else None,
+            "pct_alerta": 100 * estados.get("alerta", 0),
+            "pct_vigilancia": 100 * estados.get("vigilancia", 0),
+            "episodios_alto": int((fatiga["risk_level"] == "alto").sum()) if not fatiga.empty else 0,
+            "episodios_medio": int((fatiga["risk_level"] == "medio").sum()) if not fatiga.empty else 0,
+            "advertencias_sensor": int(len(ev) - len(fatiga)) if not ev.empty else 0,
+            "episodios_por_hora": por_hora,
+            "kss_reportes": int(len(kss)),
+            "kss_medio": kss.mean() if len(kss) else None,
+            "nivel_riesgo": nivel,
+        })
+
+    # Conductores registrados que todavía no enviaron datos
+    for u in users:
+        if u["role"] == "conductor" and u.get("session_id") and u["session_id"] not in sesiones:
+            filas.append({
+                "session_id": u["session_id"], "persona": persona_de(u["session_id"]),
+                "usuario": u["username"], "nombre": u.get("full_name") or u["username"],
+                "rol": u["role"], "activo": bool(u["active"]), "lecturas": 0, "nivel_riesgo": "sin_datos",
+            })
+
+    orden = {"alto": 0, "medio": 1, "bajo": 2, "sin_datos": 3}
+    filas.sort(key=lambda f: (orden[f["nivel_riesgo"]], -(f.get("episodios_por_hora") or 0)))
+    con_datos = [f for f in filas if f["lecturas"]]
+    return _clean({
+        "totales": {
+            "usuarios": len(users),
+            "conductores": sum(1 for u in users if u["role"] == "conductor"),
+            "sesiones": len(sesiones),
+            "lecturas": int(len(df)),
+            "episodios_fatiga": sum(f["episodios_alto"] + f["episodios_medio"] for f in con_datos),
+            "kss_reportes": int(len(reports)),
+            "horas_monitoreo": sum(f["horas_monitoreo"] for f in con_datos),
+        },
+        "por_nivel": {k: sum(1 for f in filas if f["nivel_riesgo"] == k) for k in orden},
+        "usuarios": filas,
     })
 
 
