@@ -7,6 +7,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 
+/// Servidor del backend. Fijo en Railway para que la app no pida dirección;
+/// para probar con un backend local: flutter run --dart-define=SIDFAM_SERVER=http://10.0.2.2:8000
+const kServerUrl = String.fromEnvironment(
+  'SIDFAM_SERVER',
+  defaultValue: 'https://backend-analitica-de-datos-production.up.railway.app',
+);
+
+/// Cuántos usuarios recientes se recuerdan en el login (solo el nombre, nunca la contraseña).
+const kMaxRecentUsers = 5;
+
 /// Valores por defecto (los mismos de vision.py / pulse.py) por si /api/config falla.
 const kDefaultThresholds = <String, dynamic>{
   'ear': 0.21,
@@ -22,8 +32,11 @@ class AppState extends ChangeNotifier {
   late SharedPreferences _prefs;
 
   bool ready = false;
-  String baseUrl = '';
+  final String baseUrl = normalizeUrl(kServerUrl);
   Map<String, dynamic>? user;
+
+  /// Usuarios con los que se inició sesión en este teléfono, el más reciente primero.
+  List<String> recentUsers = [];
   Map<String, dynamic>? config;
   bool mustChangePassword = false;
   String? sessionId;
@@ -49,14 +62,18 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    baseUrl = _prefs.getString('base_url') ?? '';
+    recentUsers = _prefs.getStringList('recent_users') ?? [];
     soundOn = _prefs.getBool('sound') ?? false;
     sessionId = _prefs.getString('session_id');
     api.baseUrl = baseUrl;
     api.onUnauthorized = _expire;
 
     final token = await _secure.read(key: 'token');
-    if (token != null && baseUrl.isNotEmpty) {
+    // un token guardado de otro servidor (versiones que pedían la dirección) ya no sirve
+    if (_prefs.getString('base_url') case final old? when old != baseUrl) {
+      await _prefs.remove('base_url');
+      await _secure.delete(key: 'token');
+    } else if (token != null) {
       api.token = token;
       try {
         await _loadProfile();
@@ -81,14 +98,11 @@ class AppState extends ChangeNotifier {
     return u;
   }
 
-  Future<void> login(String server, String username, String password) async {
-    baseUrl = normalizeUrl(server);
-    api.baseUrl = baseUrl;
+  Future<void> login(String username, String password) async {
     api.token = null;
-    await _prefs.setString('base_url', baseUrl);
-
     final r = await api.postJson('/api/login', {'username': username, 'password': password});
     await _storeToken(r);
+    await _rememberUser(username);
     sessionId = null; // cada login vuelve a elegir la sesión por defecto
     await _loadProfile();
     notice = null;
@@ -104,6 +118,17 @@ class AppState extends ChangeNotifier {
 
   Future<void> logout() async {
     await _clearAuth();
+    notifyListeners();
+  }
+
+  Future<void> _rememberUser(String username) async {
+    recentUsers = [username, ...recentUsers.where((u) => u != username)].take(kMaxRecentUsers).toList();
+    await _prefs.setStringList('recent_users', recentUsers);
+  }
+
+  Future<void> forgetUser(String username) async {
+    recentUsers = recentUsers.where((u) => u != username).toList();
+    await _prefs.setStringList('recent_users', recentUsers);
     notifyListeners();
   }
 
