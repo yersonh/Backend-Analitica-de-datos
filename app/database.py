@@ -424,6 +424,29 @@ def list_readings(session_id: str | None = None, limit: int | None = None,
         return _iso_rows(cur.fetchall())
 
 
+def last_readings(session_id: str) -> dict:
+    """Última lectura guardada de cada fuente ("frame" y "pulso") de la sesión.
+
+    El estado en vivo vive en memoria y se pierde al reiniciar el servidor;
+    esto permite al panel mostrar lo último conocido mientras no llegan datos.
+    """
+    sql = _ph("SELECT * FROM sensor_readings WHERE session_id = ? AND source = ? "
+              "ORDER BY timestamp DESC, id DESC LIMIT 1")
+    out = {}
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for source in ("frame", "pulso"):
+            cur.execute(sql, (session_id, source))
+            rows = _iso_rows(cur.fetchall())
+            out[source] = rows[0] if rows else None
+            if rows:
+                # la hora se guarda sin zona (hora local del servidor): la antigüedad se
+                # calcula aquí para que el cliente no dependa de su propia zona horaria
+                ts = datetime.fromisoformat(rows[0]["timestamp"])
+                rows[0]["age_seconds"] = max(0, round((datetime.now() - ts).total_seconds()))
+    return out
+
+
 def list_sessions() -> list[dict]:
     """Sesiones que tienen lecturas, con su cantidad y rango de fechas."""
     sql = """

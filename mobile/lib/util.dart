@@ -36,6 +36,16 @@ String relTime(dynamic ts) {
   return 'hace ${(s / 86400).round()} d';
 }
 
+/// "hace X" a partir de una antigüedad en segundos.
+String agoSeconds(dynamic secs) {
+  final s = asDouble(secs)?.round();
+  if (s == null) return '';
+  if (s < 60) return 'hace $s s';
+  if (s < 3600) return 'hace ${(s / 60).round()} min';
+  if (s < 86400) return 'hace ${(s / 3600).round()} h';
+  return 'hace ${(s / 86400).round()} d';
+}
+
 String clockFull(dynamic ts) {
   final d = parseTs(ts);
   return d == null ? (ts?.toString() ?? '') : DateFormat('dd MMM HH:mm:ss', 'es').format(d);
@@ -72,6 +82,11 @@ const kStates = <String, StatusStyle>{
     'Revisar sensor',
     'Lectura de pulso fuera de rango fisiológico. Posible problema del sensor, no del conductor.',
   ),
+  'guardada': StatusStyle(
+    C.azul,
+    'Última lectura',
+    'Sin datos en vivo por ahora: se muestra lo último que recibió el sistema. Se actualiza solo en cuanto lleguen lecturas.',
+  ),
   'sindatos': StatusStyle(
     C.gris,
     'Esperando datos',
@@ -81,12 +96,46 @@ const kStates = <String, StatusStyle>{
 
 /// Clave de [kStates] para un estado de /estado.
 String statusKey(Map<String, dynamic>? s) {
+  if (s?['saved'] == true) return 'guardada';
   if (s == null || s['has_any_data'] != true) return 'sindatos';
   final st = s['status'];
   if (st == 'advertencia_sensor') return 'advertencia_sensor';
   if (st == 'alerta') return 'alerta-${s['risk_level'] ?? 'medio'}';
   if (st == 'vigilancia') return 'vigilancia';
   return 'normal';
+}
+
+/// Si el servidor no tiene datos en memoria (p. ej. recién reiniciado) pero
+/// envía `ultima_guardada`, arma el estado con esas lecturas de la base y lo
+/// marca con `saved` / `saved_at`. Con datos en vivo devuelve [s] tal cual.
+Map<String, dynamic>? withSaved(Map<String, dynamic>? s) {
+  final g = s?['ultima_guardada'];
+  if (s == null || s['has_any_data'] == true || g is! Map) return s;
+  final f = g['frame'] is Map ? (g['frame'] as Map).cast<String, dynamic>() : null;
+  final p = g['pulso'] is Map ? (g['pulso'] as Map).cast<String, dynamic>() : null;
+  if (f == null && p == null) return s;
+  // age_seconds lo calcula el servidor (sus horas no traen zona horaria)
+  num age(Map<String, dynamic>? r) => (r?['age_seconds'] as num?) ?? double.infinity;
+  final last = (f != null && age(f) < age(p)) ? f : (p ?? f!);
+  bool? b(dynamic v) => v == null ? null : (v == true || v == 1);
+  return {
+    ...s,
+    'saved': true,
+    'saved_age': last['age_seconds'],
+    'ear': f?['ear'],
+    'mar': f?['mar'],
+    'head_tilt_deg': f?['head_tilt_deg'],
+    'face_detected': b(f?['face_detected']),
+    'eyes_closed': b(f?['eyes_closed']) ?? false,
+    'yawning': b(f?['yawning']) ?? false,
+    'head_tilted': b(f?['head_tilted']) ?? false,
+    'bpm': p?['bpm'],
+    'bpm_mean': p?['bpm_mean'],
+    'bpm_std': p?['bpm_std'],
+    'baseline_bpm': p?['baseline_bpm'],
+    'implausible_reading': b(p?['implausible_reading']) ?? false,
+    'data_is_fresh': false,
+  };
 }
 
 class RiskStyle {

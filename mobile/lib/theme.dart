@@ -106,12 +106,15 @@ BoxDecoration glassDecoration({Color? accent, double radius = 20}) => BoxDecorat
   ),
   borderRadius: BorderRadius.circular(radius),
   border: Border.all(color: accent?.withValues(alpha: 0.5) ?? C.border),
-  boxShadow: [
-    BoxShadow(
-      color: (accent ?? Colors.black).withValues(alpha: accent == null ? 0.35 : 0.25),
-      blurRadius: 30,
-      offset: const Offset(0, 14),
-      spreadRadius: -10,
-    ),
-  ],
+  // sombra solo con acento: una sombra difusa en cada tarjeta es cara de dibujar
+  boxShadow: accent == null
+      ? null
+      : [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.22),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+            spreadRadius: -8,
+          ),
+        ],
 );

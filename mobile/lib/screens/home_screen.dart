@@ -26,7 +26,12 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  late final AnimationController _fade = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 250),
+    value: 1,
+  );
   late final AppState _app = AppScope.read(context);
   late final LiveController _live = LiveController(_app)..onNewEvents = _alert;
   String? _session;
@@ -46,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _app.removeListener(_onApp);
     _live.dispose();
+    _fade.dispose();
     super.dispose();
   }
 
@@ -183,6 +189,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const ShimmerText(
                     'SIDFAM',
+                    animate: false,
                     style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: 2),
                   ),
                   InkWell(
@@ -216,38 +223,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _UserMenu(app: app),
         ],
       ),
-      // como un IndexedStack (cada pestaña conserva su estado) pero con fundido;
-      // las pestañas ocultas no animan, así sus tarjetas entran al mostrarse
-      body: Stack(
-        children: [
-          for (var i = 0; i < tabs.length; i++)
-            Positioned.fill(
-              child: IgnorePointer(
-                ignoring: i != _tab,
-                child: ExcludeSemantics(
-                  excluding: i != _tab,
-                  child: TickerMode(
-                    enabled: i == _tab,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeOut,
-                      opacity: i == _tab ? 1 : 0,
-                      child: AnimatedSlide(
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeOutCubic,
-                        offset: i == _tab ? Offset.zero : const Offset(0, 0.015),
-                        child: tabs[i].$3,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
+      // Solo se dibuja la pestaña activa (las demás conservan su estado pero no
+      // animan: TickerMode). Al cambiar, la nueva entra con un fundido corto.
+      body: FadeTransition(
+        opacity: CurvedAnimation(parent: _fade, curve: Curves.easeOut),
+        child: IndexedStack(
+          index: _tab,
+          children: [for (var i = 0; i < tabs.length; i++) TickerMode(enabled: i == _tab, child: tabs[i].$3)],
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) {
+          if (i == _tab) return;
+          setState(() => _tab = i);
+          _fade.forward(from: 0);
+        },
         destinations: [for (final t in tabs) NavigationDestination(icon: Icon(t.$2), label: t.$1)],
       ),
     );
@@ -265,6 +256,8 @@ class _LiveChip extends StatelessWidget {
     final fresh = has && s?['data_is_fresh'] == true;
     final (text, color) = !live.connected
         ? ('Sin conexión', C.rojo)
+        : s?['saved'] == true
+        ? ('Guardado', C.azul)
         : !has
         ? ('Sin datos', C.gris)
         : fresh

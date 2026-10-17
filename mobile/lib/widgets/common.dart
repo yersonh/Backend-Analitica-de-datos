@@ -17,43 +17,46 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // RepaintBoundary: lo que se anima dentro de una tarjeta no repinta las demás
     return FadeSlideIn(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeOutCubic,
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: padding ?? const EdgeInsets.all(16),
-        decoration: glassDecoration(accent: accent),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (title != null) ...[
-              Row(
-                children: [
-                  if (icon != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: (accent ?? C.cyan).withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(9),
+      child: RepaintBoundary(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: padding ?? const EdgeInsets.all(16),
+          decoration: glassDecoration(accent: accent),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (title != null) ...[
+                Row(
+                  children: [
+                    if (icon != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: (accent ?? C.cyan).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Icon(icon, size: 16, color: accent ?? C.cyan),
                       ),
-                      child: Icon(icon, size: 16, color: accent ?? C.cyan),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: Text(
+                        title!,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: C.text),
+                      ),
                     ),
-                    const SizedBox(width: 10),
+                    ?trailing,
                   ],
-                  Expanded(
-                    child: Text(
-                      title!,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: C.text),
-                    ),
-                  ),
-                  ?trailing,
-                ],
-              ),
-              const SizedBox(height: 12),
+                ),
+                const SizedBox(height: 12),
+              ],
+              child,
             ],
-            child,
-          ],
+          ),
         ),
       ),
     );

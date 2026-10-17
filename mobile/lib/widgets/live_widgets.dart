@@ -1,11 +1,11 @@
 // Piezas del panel en vivo: ECG animado, medidores con umbral, tendencias,
 // dona de eventos e indicador de apertura ocular.
 
+import 'dart:async';
 import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../live_controller.dart';
 import '../theme.dart';
@@ -17,18 +17,27 @@ import 'common.dart';
 // ---------------------------------------------------------------------------
 
 class EcgView extends StatefulWidget {
-  const EcgView({super.key, required this.bpm, required this.color, this.height = 70});
+  const EcgView({super.key, required this.bpm, required this.color, this.height = 70, this.phase});
   final double? bpm;
   final Color color;
   final double height;
+
+  /// Si se da, recibe la fase del latido en cada cuadro (para sincronizar el corazón).
+  final ValueNotifier<double>? phase;
 
   @override
   State<EcgView> createState() => _EcgViewState();
 }
 
-class _EcgViewState extends State<EcgView> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
+class _EcgViewState extends State<EcgView> {
+  // Temporizador de ~25 fps en vez de Ticker: un Ticker pide un cuadro en cada
+  // refresco (60/s) y Flutter compone la pantalla entera en cada uno, aunque no
+  // cambie nada; eso calentaba el teléfono. Así solo hay cuadro cuando se dibuja.
+  static const _frame = Duration(milliseconds: 40);
+  Timer? _timer;
+  final _clock = Stopwatch();
   Duration _last = Duration.zero;
+  bool _visible = true;
   double _phase = 0;
   List<double?> _ys = const [];
   int _x = 0;
@@ -38,14 +47,37 @@ class _EcgViewState extends State<EcgView> with SingleTickerProviderStateMixin {
   static double _wave(double p) =>
       _g(p, .16, .028, .12) - _g(p, .34, .008, .14) + _g(p, .38, .011, 1) - _g(p, .42, .01, .28) + _g(p, .64, .045, .3);
 
+  // corre solo con pulso y con la pestaña visible; si no, la línea queda quieta
+  void _sync() {
+    final run = widget.bpm != null && _visible;
+    if (run && _timer == null) {
+      _clock
+        ..reset()
+        ..start();
+      _last = Duration.zero;
+      _timer = Timer.periodic(_frame, (_) => _tick(_clock.elapsed));
+    } else if (!run && _timer != null) {
+      _timer!.cancel();
+      _timer = null;
+      _clock.stop();
+    }
+  }
+
   @override
-  void initState() {
-    super.initState();
-    _ticker = createTicker(_tick)..start();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _visible = TickerMode.valuesOf(context).enabled;
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(EcgView old) {
+    super.didUpdateWidget(old);
+    _sync();
   }
 
   void _tick(Duration now) {
-    final dt = min((now - _last).inMicroseconds / 1e6, 0.05);
+    final dt = min((now - _last).inMicroseconds / 1e6, 0.08);
     _last = now;
     if (_ys.isEmpty) return;
     const speed = 110.0; // px/s
@@ -61,12 +93,13 @@ class _EcgViewState extends State<EcgView> with SingleTickerProviderStateMixin {
         _ys[(_x + k) % _ys.length] = null; // hueco delante del cabezal
       }
     }
+    widget.phase?.value = _phase;
     setState(() {});
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
+    _timer?.cancel();
     super.dispose();
   }
 
@@ -76,13 +109,17 @@ class _EcgViewState extends State<EcgView> with SingleTickerProviderStateMixin {
       builder: (context, c) {
         final w = c.maxWidth.floor();
         if (_ys.length != w && w > 0) {
-          _ys = List<double?>.filled(w, null);
+          _ys = List<double?>.filled(w, widget.bpm == null ? 0.0 : null); // sin pulso: línea plana
           _x = 0;
         }
-        return SizedBox(
-          height: widget.height,
-          width: double.infinity,
-          child: CustomPaint(painter: _EcgPainter(_ys, _x, widget.color)),
+        // RepaintBoundary: cada cuadro del trazo repinta solo este recuadro, no toda
+        // la pantalla con las sombras de las tarjetas (eso calentaba el teléfono)
+        return RepaintBoundary(
+          child: SizedBox(
+            height: widget.height,
+            width: double.infinity,
+            child: CustomPaint(painter: _EcgPainter(_ys, _x, widget.color)),
+          ),
         );
       },
     );
@@ -100,10 +137,11 @@ class _EcgPainter extends CustomPainter {
     final h = size.height;
     double y(double amp) => h * 0.62 - amp * h * 0.48;
     final glow = Paint()
-      ..color = color.withValues(alpha: 0.35)
-      ..strokeWidth = 5
+      ..color = color.withValues(alpha: 0.22)
+      ..strokeWidth = 6
       ..style = PaintingStyle.stroke
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round; // halo sin desenfoque: el blur por cuadro es caro
     final line = Paint()
       ..color = color
       ..strokeWidth = 2

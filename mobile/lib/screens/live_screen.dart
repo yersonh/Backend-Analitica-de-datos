@@ -129,6 +129,30 @@ class _Hero extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(st.desc, style: const TextStyle(color: C.muted)),
+                    if (s['saved'] == true) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: st.accent.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(99),
+                          border: Border.all(color: st.accent.withValues(alpha: 0.4)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.history, size: 14, color: st.accent),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Recibida ${agoSeconds(s['saved_age'])}',
+                                style: TextStyle(color: st.accent, fontSize: 12, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -218,12 +242,14 @@ class _PulseCard extends StatefulWidget {
   State<_PulseCard> createState() => _PulseCardState();
 }
 
-class _PulseCardState extends State<_PulseCard> with SingleTickerProviderStateMixin {
-  late final AnimationController _beat = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+class _PulseCardState extends State<_PulseCard> {
+  // fase del latido (0..1) que publica el ECG: el corazón late con el mismo reloj
+  // de ~30 fps en lugar de tener uno propio a 60 fps (eso calentaba el teléfono)
+  final _phase = ValueNotifier<double>(0);
 
   @override
   void dispose() {
-    _beat.dispose();
+    _phase.dispose();
     super.dispose();
   }
 
@@ -237,20 +263,12 @@ class _PulseCardState extends State<_PulseCard> with SingleTickerProviderStateMi
     final implausible = s['implausible_reading'] == true;
     final fisio = s['physiological_signal'] == true;
 
-    if (bpm != null) {
-      final period = Duration(milliseconds: (60000 / bpm.clamp(30, 220)).round());
-      if (_beat.duration != period || !_beat.isAnimating) {
-        _beat.duration = period;
-        _beat.repeat();
-      }
-    } else if (_beat.isAnimating) {
-      _beat.stop();
-    }
-
     final (pillText, pillColor, pillIdle) = implausible
         ? ('Lectura inválida', C.rojo, false)
         : fisio
         ? ('Somnolencia', C.rojo, false)
+        : bpm != null && s['saved'] == true
+        ? ('Guardado', C.azul, false)
         : bpm != null
         ? ('Estable', C.verde, false)
         : ('Sin datos', C.gris, true);
@@ -265,14 +283,16 @@ class _PulseCardState extends State<_PulseCard> with SingleTickerProviderStateMi
         children: [
           Row(
             children: [
-              AnimatedBuilder(
-                animation: _beat,
-                builder: (context, child) {
-                  final t = _beat.value;
-                  final scale = 1 + (t < 0.15 ? t / 0.15 : (t < 0.4 ? (0.4 - t) / 0.25 : 0)) * 0.18;
-                  return Transform.scale(scale: scale, child: child);
-                },
-                child: const Icon(Icons.favorite, color: C.rojo, size: 40),
+              RepaintBoundary(
+                child: ValueListenableBuilder<double>(
+                  valueListenable: _phase,
+                  builder: (context, p, child) {
+                    // golpe en el pico R del trazo (fase ≈ 0.38); quieto si el ECG está detenido
+                    final scale = 1 + (1 - ((p - 0.38).abs() / 0.12)).clamp(0.0, 1.0) * 0.18;
+                    return Transform.scale(scale: scale, child: child);
+                  },
+                  child: const Icon(Icons.favorite, color: C.rojo, size: 40),
+                ),
               ),
               const SizedBox(width: 14),
               TweenAnimationBuilder<double>(
@@ -298,7 +318,7 @@ class _PulseCardState extends State<_PulseCard> with SingleTickerProviderStateMi
             ],
           ),
           const SizedBox(height: 8),
-          EcgView(bpm: s['data_is_fresh'] == true ? bpm : null, color: ecgColor),
+          EcgView(bpm: s['data_is_fresh'] == true ? bpm : null, color: ecgColor, phase: _phase),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -333,7 +353,9 @@ class _FusionCard extends StatelessWidget {
     final vis = s['visual_signal'] == true, fis = s['physiological_signal'] == true;
     final has = s['has_any_data'] == true;
     final both = vis && fis;
-    final out = !has
+    final out = s['saved'] == true
+        ? 'EN ESPERA'
+        : !has
         ? 'SIN DATOS'
         : keyName.startsWith('alerta')
         ? 'ALERTA ${(s['risk_level'] ?? '').toString().toUpperCase()}'

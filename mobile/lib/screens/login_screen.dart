@@ -65,7 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Center(child: SidfamLogo(size: 96, intro: true)),
+                    const Center(child: SidfamLogo(size: 96, intro: true, animate: true)),
                     const SizedBox(height: 18),
                     const FadeSlideIn(
                       delay: Duration(milliseconds: 500),

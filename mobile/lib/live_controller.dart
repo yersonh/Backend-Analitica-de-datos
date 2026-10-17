@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'api.dart';
 import 'app_state.dart';
+import 'util.dart';
 
 class TrendPoint {
   const TrendPoint(this.t, this.v);
@@ -80,7 +81,8 @@ class LiveController extends ChangeNotifier {
     _statusBusy = true;
     final session = _session;
     try {
-      final s = await app.api.getJson('/estado', _query);
+      // tras un reinicio del servidor se muestra lo último guardado hasta que llegue algo en vivo
+      final s = withSaved(await app.api.getJson('/estado', _query))!;
       if (session != _session) return;
       status = s;
       connected = true;

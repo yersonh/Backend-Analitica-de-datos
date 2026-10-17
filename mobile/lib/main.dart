@@ -60,7 +60,7 @@ class _Gate extends StatelessWidget {
 
   (String, Widget) _screen(AppState app) {
     if (!app.ready) {
-      return ('splash', const Scaffold(body: Center(child: SidfamLogo(size: 120, intro: true))));
+      return ('splash', const Scaffold(body: Center(child: SidfamLogo(size: 120, intro: true, animate: true))));
     }
     if (!app.loggedIn) {
       // si expiró la sesión con una pantalla abierta encima (usuarios, clave...), se cierra

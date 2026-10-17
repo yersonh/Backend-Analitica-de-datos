@@ -15,12 +15,14 @@ bool _reduceMotion(BuildContext context) => MediaQuery.maybeDisableAnimationsOf(
 // Logo
 // ======================================================================
 
-/// Logo animado: el iris mira y parpadea, un destello recorre el trazo de ECG
-/// y, con [intro], los párpados se dibujan al aparecer.
+/// Logo SIDFAM. Con [intro] los párpados se dibujan al aparecer; con [animate]
+/// el iris mira y parpadea y un destello recorre el ECG sin parar. La animación
+/// continua gasta batería: úsala solo en pantallas breves (splash, login).
 class SidfamLogo extends StatefulWidget {
-  const SidfamLogo({super.key, this.size = 48, this.intro = false});
+  const SidfamLogo({super.key, this.size = 48, this.intro = false, this.animate = false});
   final double size;
   final bool intro;
+  final bool animate;
 
   @override
   State<SidfamLogo> createState() => _SidfamLogoState();
@@ -44,8 +46,8 @@ class _SidfamLogoState extends State<SidfamLogo> with TickerProviderStateMixin {
       _run.stop();
     } else {
       if (_intro.value < 1 && !_intro.isAnimating) _intro.forward();
-      if (!_iris.isAnimating) _iris.repeat();
-      if (!_run.isAnimating) _run.repeat();
+      if (widget.animate && !_iris.isAnimating) _iris.repeat();
+      if (widget.animate && !_run.isAnimating) _run.repeat();
     }
   }
 
@@ -63,7 +65,12 @@ class _SidfamLogoState extends State<SidfamLogo> with TickerProviderStateMixin {
       child: SizedBox.square(
         dimension: widget.size,
         child: CustomPaint(
-          painter: _LogoPainter(intro: _intro, iris: _iris, run: _run, still: _reduceMotion(context)),
+          painter: _LogoPainter(
+            intro: _intro,
+            iris: _iris,
+            run: _run,
+            still: !widget.animate || _reduceMotion(context),
+          ),
         ),
       ),
     );
@@ -259,64 +266,28 @@ class _LogoPainter extends CustomPainter {
 // Fondo aurora
 // ======================================================================
 
-/// Manchas de color difusas que derivan lentamente detrás de toda la app.
-class AuroraBackground extends StatefulWidget {
+/// Manchas de color difusas detrás de toda la app. Es estática a propósito:
+/// animarla redibujaba la pantalla completa a 60 fps y calentaba el teléfono.
+class AuroraBackground extends StatelessWidget {
   const AuroraBackground({super.key});
 
   @override
-  State<AuroraBackground> createState() => _AuroraBackgroundState();
-}
-
-class _AuroraBackgroundState extends State<AuroraBackground> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(seconds: 30));
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_reduceMotion(context)) {
-      _c.stop();
-    } else if (!_c.isAnimating) {
-      _c.repeat();
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => RepaintBoundary(
-    child: CustomPaint(painter: _AuroraPainter(_c), child: const SizedBox.expand()),
+  Widget build(BuildContext context) => const RepaintBoundary(
+    child: CustomPaint(painter: _AuroraPainter(), child: SizedBox.expand()),
   );
 }
 
 class _AuroraPainter extends CustomPainter {
-  _AuroraPainter(this.t) : super(repaint: t);
-  final Animation<double> t;
+  const _AuroraPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = C.bg);
-    final a = t.value * 2 * math.pi;
     final m = size.longestSide;
     final blobs = <(Offset, double, Color)>[
-      (
-        Offset(size.width * (.05 + .12 * math.sin(a)), size.height * (.02 + .06 * math.cos(a))),
-        m * .62,
-        const Color(0x3322D3EE),
-      ),
-      (
-        Offset(size.width * (.98 + .08 * math.cos(a + 1)), size.height * (.38 + .08 * math.sin(a + 1))),
-        m * .58,
-        const Color(0x2E8B5CF6),
-      ),
-      (
-        Offset(size.width * (.4 + .18 * math.sin(a + 2.4)), size.height * (1.02 + .05 * math.cos(a + 2.4))),
-        m * .55,
-        const Color(0x24F472B6),
-      ),
+      (Offset(size.width * .1, size.height * .05), m * .62, const Color(0x3322D3EE)),
+      (Offset(size.width * 1.02, size.height * .42), m * .58, const Color(0x2E8B5CF6)),
+      (Offset(size.width * .3, size.height * 1.03), m * .55, const Color(0x24F472B6)),
     ];
     for (final (c, r, col) in blobs) {
       canvas.drawCircle(c, r, Paint()..shader = ui.Gradient.radial(c, r, [col, col.withValues(alpha: 0)]));
@@ -333,10 +304,13 @@ class _AuroraPainter extends CustomPainter {
 
 /// Texto con gradiente que se desplaza (como .fx-shine del web).
 class ShimmerText extends StatefulWidget {
-  const ShimmerText(this.text, {super.key, required this.style, this.textAlign});
+  const ShimmerText(this.text, {super.key, required this.style, this.textAlign, this.animate = true});
   final String text;
   final TextStyle style;
   final TextAlign? textAlign;
+
+  /// false: gradiente fijo (para lo que queda siempre en pantalla, como la barra superior).
+  final bool animate;
 
   @override
   State<ShimmerText> createState() => _ShimmerTextState();
@@ -348,7 +322,7 @@ class _ShimmerTextState extends State<ShimmerText> with SingleTickerProviderStat
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_reduceMotion(context)) {
+    if (!widget.animate || _reduceMotion(context)) {
       _c.stop();
     } else if (!_c.isAnimating) {
       _c.repeat();

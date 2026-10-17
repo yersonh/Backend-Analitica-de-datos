@@ -227,6 +227,9 @@ def get_status(session_id: str | None = None, user: User = Depends(require("pane
     session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
     status = fusion_engine.get_current_status(session_id)
     status["normal_count"] = database.normal_reading_count(session_id=session_id)
+    # Tras reiniciar el servidor la memoria está vacía: se envía lo último guardado
+    # (cámara y pulso por separado) para que el panel no aparezca vacío.
+    status["ultima_guardada"] = None if status["has_any_data"] else database.last_readings(session_id)
     return status
 
 
