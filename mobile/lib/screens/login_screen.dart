@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../app_state.dart';
 import '../theme.dart';
+import '../widgets/brand.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -64,64 +65,99 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(Icons.remove_red_eye_outlined, size: 56, color: C.cyan),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'SIDFAM',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
-                    ),
-                    const Text(
-                      'Sistema inteligente de detección de fatiga en conductores',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: C.muted),
-                    ),
-                    const SizedBox(height: 32),
-                    TextFormField(
-                      controller: _server,
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Servidor',
-                        hintText: 'http://192.168.1.100:8000',
-                        prefixIcon: Icon(Icons.dns_outlined),
+                    const Center(child: SidfamLogo(size: 96, intro: true)),
+                    const SizedBox(height: 18),
+                    const FadeSlideIn(
+                      delay: Duration(milliseconds: 500),
+                      child: ShimmerText(
+                        'SIDFAM',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800, letterSpacing: 10),
                       ),
-                      validator: (v) => (v ?? '').trim().isEmpty ? 'Escribe la dirección del backend' : null,
                     ),
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: _user,
-                      autocorrect: false,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(labelText: 'Usuario', prefixIcon: Icon(Icons.person_outline)),
-                      validator: (v) => (v ?? '').trim().isEmpty ? 'Escribe tu usuario' : null,
+                    const SizedBox(height: 6),
+                    const FadeSlideIn(
+                      delay: Duration(milliseconds: 650),
+                      child: Text(
+                        'Cada parpadeo cuenta. Visión y ritmo cardíaco fusionados para cuidar a quien conduce.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: C.muted, height: 1.4),
+                      ),
                     ),
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: _pass,
-                      obscureText: _obscure,
-                      onFieldSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(
-                        labelText: 'Contraseña',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                          onPressed: () => setState(() => _obscure = !_obscure),
+                    const SizedBox(height: 30),
+                    FadeSlideIn(
+                      delay: const Duration(milliseconds: 800),
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: glassDecoration(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextFormField(
+                              controller: _server,
+                              keyboardType: TextInputType.url,
+                              autocorrect: false,
+                              decoration: const InputDecoration(
+                                labelText: 'Servidor',
+                                hintText: 'http://192.168.1.100:8000',
+                                prefixIcon: Icon(Icons.dns_outlined),
+                              ),
+                              validator: (v) => (v ?? '').trim().isEmpty ? 'Escribe la dirección del backend' : null,
+                            ),
+                            const SizedBox(height: 14),
+                            TextFormField(
+                              controller: _user,
+                              autocorrect: false,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Usuario',
+                                prefixIcon: Icon(Icons.person_outline),
+                              ),
+                              validator: (v) => (v ?? '').trim().isEmpty ? 'Escribe tu usuario' : null,
+                            ),
+                            const SizedBox(height: 14),
+                            TextFormField(
+                              controller: _pass,
+                              obscureText: _obscure,
+                              onFieldSubmitted: (_) => _submit(),
+                              decoration: InputDecoration(
+                                labelText: 'Contraseña',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                                  onPressed: () => setState(() => _obscure = !_obscure),
+                                ),
+                              ),
+                              validator: (v) => (v ?? '').isEmpty ? 'Escribe tu contraseña' : null,
+                            ),
+                            if (_error != null) ...[
+                              const SizedBox(height: 14),
+                              Text(_error!, style: const TextStyle(color: C.rojo)),
+                            ],
+                            const SizedBox(height: 22),
+                            GradientButton(
+                              onPressed: _busy ? null : _submit,
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 250),
+                                child: _busy
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2.4, color: Color(0xFF031322)),
+                                      )
+                                    : const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text('Iniciar sesión'),
+                                          SizedBox(width: 8),
+                                          Icon(Icons.arrow_forward_rounded, size: 20),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      validator: (v) => (v ?? '').isEmpty ? 'Escribe tu contraseña' : null,
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 14),
-                      Text(_error!, style: const TextStyle(color: C.rojo)),
-                    ],
-                    const SizedBox(height: 22),
-                    FilledButton(
-                      onPressed: _busy ? null : _submit,
-                      style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                      child: _busy
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text('Iniciar sesión'),
                     ),
                     const SizedBox(height: 18),
                     const Text(

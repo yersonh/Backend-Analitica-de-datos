@@ -2,6 +2,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'brand.dart';
 
 /// Tarjeta oscura con borde, equivalente al `.glass` del panel web.
 class GlassCard extends StatelessWidget {
@@ -16,37 +17,44 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: padding ?? const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: C.card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accent?.withValues(alpha: 0.45) ?? C.border),
-        boxShadow: accent == null
-            ? null
-            : [BoxShadow(color: accent!.withValues(alpha: 0.18), blurRadius: 24, spreadRadius: -4)],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (title != null) ...[
-            Row(
-              children: [
-                if (icon != null) ...[Icon(icon, size: 18, color: C.muted), const SizedBox(width: 8)],
-                Expanded(
-                  child: Text(
-                    title!,
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: C.text),
+    return FadeSlideIn(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeOutCubic,
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: padding ?? const EdgeInsets.all(16),
+        decoration: glassDecoration(accent: accent),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (title != null) ...[
+              Row(
+                children: [
+                  if (icon != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: (accent ?? C.cyan).withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Icon(icon, size: 16, color: accent ?? C.cyan),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: Text(
+                      title!,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: C.text),
+                    ),
                   ),
-                ),
-                ?trailing,
-              ],
-            ),
-            const SizedBox(height: 12),
+                  ?trailing,
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            child,
           ],
-          child,
-        ],
+        ),
       ),
     );
   }
@@ -89,9 +97,13 @@ class KpiTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: C.cardHi,
         borderRadius: BorderRadius.circular(14),
-        border: Border(left: BorderSide(color: color, width: 3)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [color.withValues(alpha: 0.16), C.cardHi.withValues(alpha: 0.7)],
+        ),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -99,7 +111,18 @@ class KpiTile extends StatelessWidget {
         children: [
           Text(label, style: const TextStyle(color: C.muted, fontSize: 12)),
           const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 350),
+            transitionBuilder: (child, a) => FadeTransition(
+              opacity: a,
+              child: ScaleTransition(scale: Tween(begin: 0.8, end: 1.0).animate(a), child: child),
+            ),
+            child: Text(
+              value,
+              key: ValueKey(value),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+            ),
+          ),
           if (hint != null) ...[
             const SizedBox(height: 2),
             Text(hint!, style: const TextStyle(color: C.muted, fontSize: 11)),

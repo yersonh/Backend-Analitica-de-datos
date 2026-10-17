@@ -10,6 +10,7 @@ import '../app_state.dart';
 import '../live_controller.dart';
 import '../theme.dart';
 import '../util.dart';
+import '../widgets/brand.dart';
 import 'analytics_screen.dart';
 import 'change_password_screen.dart';
 import 'history_screen.dart';
@@ -172,17 +173,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 14,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
           children: [
-            const Text('SIDFAM', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-            InkWell(
-              onTap: app.can('todas_sesiones') ? _pickSession : null,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+            const SidfamLogo(size: 36),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Sesión ${app.sessionId ?? '—'}', style: const TextStyle(color: C.muted, fontSize: 12)),
-                  if (app.can('todas_sesiones')) const Icon(Icons.arrow_drop_down, size: 18, color: C.muted),
+                  const ShimmerText(
+                    'SIDFAM',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: 2),
+                  ),
+                  InkWell(
+                    onTap: app.can('todas_sesiones') ? _pickSession : null,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('Sesión ${app.sessionId ?? '—'}', style: const TextStyle(color: C.muted, fontSize: 12)),
+                        if (app.can('todas_sesiones')) const Icon(Icons.arrow_drop_down, size: 18, color: C.muted),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -204,7 +216,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _UserMenu(app: app),
         ],
       ),
-      body: IndexedStack(index: _tab, children: [for (final t in tabs) t.$3]),
+      // como un IndexedStack (cada pestaña conserva su estado) pero con fundido;
+      // las pestañas ocultas no animan, así sus tarjetas entran al mostrarse
+      body: Stack(
+        children: [
+          for (var i = 0; i < tabs.length; i++)
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: i != _tab,
+                child: ExcludeSemantics(
+                  excluding: i != _tab,
+                  child: TickerMode(
+                    enabled: i == _tab,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                      opacity: i == _tab ? 1 : 0,
+                      child: AnimatedSlide(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeOutCubic,
+                        offset: i == _tab ? Offset.zero : const Offset(0, 0.015),
+                        child: tabs[i].$3,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),

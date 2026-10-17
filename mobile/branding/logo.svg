@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Logo SIDFAM: el párpado superior es la visión y el inferior es un trazo de ECG (pulso). -->
+  <defs>
+    <linearGradient id="sf-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1d40"/>
+      <stop offset="1" stop-color="#040814"/>
+    </linearGradient>
+    <radialGradient id="sf-glow" cx="0.3" cy="0.22" r="0.75">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sf-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7dd3fc" stop-opacity="0.7"/>
+      <stop offset="0.5" stop-color="#818cf8" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#c084fc" stop-opacity="0.6"/>
+    </linearGradient>
+    <linearGradient id="sf-vis" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.55" stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#c084fc"/>
+    </linearGradient>
+    <linearGradient id="sf-pul" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#818cf8"/>
+      <stop offset="0.5" stop-color="#f472b6"/>
+      <stop offset="1" stop-color="#fb7185"/>
+    </linearGradient>
+    <radialGradient id="sf-iris" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="0.6" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4c1d95"/>
+    </radialGradient>
+    <filter id="sf-blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+  </defs>
+
+  <rect x="8" y="8" width="496" height="496" rx="118" fill="url(#sf-bg)"/>
+  <rect x="8" y="8" width="496" height="496" rx="118" fill="url(#sf-glow)"/>
+  <rect x="10" y="10" width="492" height="492" rx="116" fill="none" stroke="url(#sf-rim)" stroke-width="4"/>
+
+  <mask id="sf-cut">
+    <rect width="512" height="512" fill="#fff"/>
+    <path d="M84 262 C112 300 150 324 190 332 L224 332 L242 300 L260 394 L280 280 L296 332 L322 332 C362 324 400 300 428 262" fill="none" stroke="#000" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+  </mask>
+
+  <!-- iris (recortado donde lo cruza el ECG) -->
+  <g mask="url(#sf-cut)">
+    <circle cx="256" cy="236" r="58" fill="url(#sf-iris)"/>
+    <circle cx="256" cy="236" r="58" fill="none" stroke="#a5f3fc" stroke-opacity="0.35" stroke-width="4"/>
+    <circle cx="256" cy="236" r="24" fill="#040814"/>
+    <circle cx="275" cy="217" r="10" fill="#fff"/>
+  </g>
+
+  <!-- resplandor -->
+  <g filter="url(#sf-blur)" opacity="0.55">
+    <path d="M84 262 C146 148 366 148 428 262" fill="none" stroke="url(#sf-vis)" stroke-width="30" stroke-linecap="round"/>
+    <path d="M84 262 C112 300 150 324 190 332 L224 332 L242 300 L260 394 L280 280 L296 332 L322 332 C362 324 400 300 428 262" fill="none" stroke="url(#sf-pul)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- párpado superior: visión -->
+  <path d="M84 262 C146 148 366 148 428 262" fill="none" stroke="url(#sf-vis)" stroke-width="28" stroke-linecap="round"/>
+  <!-- párpado inferior: trazo de ECG (pulso) -->
+  <path d="M84 262 C112 300 150 324 190 332 L224 332 L242 300 L260 394 L280 280 L296 332 L322 332 C362 324 400 300 428 262" fill="none" stroke="url(#sf-pul)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

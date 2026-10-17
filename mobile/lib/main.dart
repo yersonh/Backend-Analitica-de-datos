@@ -13,6 +13,7 @@ import 'screens/change_password_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'theme.dart';
+import 'widgets/brand.dart';
 
 final _navigator = GlobalKey<NavigatorState>();
 
@@ -34,6 +35,8 @@ class SidfamApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigator,
       theme: buildTheme(),
+      // fondo aurora común a todas las pantallas (los Scaffold son transparentes)
+      builder: (context, child) => Stack(children: [const AuroraBackground(), ?child]),
       home: const _Gate(),
     );
   }
@@ -46,16 +49,27 @@ class _Gate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
+    final (String key, Widget screen) = _screen(app);
+    // fundido entre splash, login, cambio de clave y panel
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 550),
+      switchInCurve: Curves.easeOutCubic,
+      child: KeyedSubtree(key: ValueKey(key), child: screen),
+    );
+  }
+
+  (String, Widget) _screen(AppState app) {
     if (!app.ready) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return ('splash', const Scaffold(body: Center(child: SidfamLogo(size: 120, intro: true))));
     }
     if (!app.loggedIn) {
       // si expiró la sesión con una pantalla abierta encima (usuarios, clave...), se cierra
       WidgetsBinding.instance.addPostFrameCallback((_) => _navigator.currentState?.popUntil((r) => r.isFirst));
-      return const LoginScreen();
+      return ('login', const LoginScreen());
     }
-    if (app.mustChangePassword) return const ChangePasswordScreen(forced: true);
+    if (app.mustChangePassword) return ('clave', const ChangePasswordScreen(forced: true));
     // la clave cambia con el usuario: al reentrar se crea un panel nuevo
-    return HomeScreen(key: ValueKey('home-${app.user!['id']}'));
+    final id = app.user!['id'];
+    return ('home-$id', HomeScreen(key: ValueKey('home-$id')));
   }
 }

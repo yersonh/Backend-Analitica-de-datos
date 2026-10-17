@@ -141,6 +141,13 @@ First boot with an empty `users` table creates `admin` with a temporary
 password printed to the uvicorn log. Env: `SECRET_KEY`, `DEVICE_API_KEY`,
 `ADMIN_USERNAME`/`ADMIN_PASSWORD`. Login lockout state is in memory.
 
+**Mobile look & feel**: `mobile/lib/widgets/brand.dart` holds the brand widgets
+(`SidfamLogo` — animated eye whose lower lid is an ECG trace, `AuroraBackground`,
+`ShimmerText`, `GradientButton`, `FadeSlideIn`). The aurora is painted once in
+`MaterialApp.builder`, so Scaffolds stay transparent. The logo's source drawing is
+`mobile/branding/logo.svg`; if it changes, update `SidfamLogo` to match and
+regenerate the Android/iOS launcher PNGs.
+
 **Sessions**: `session_id` (default `"default"`) is the multi-user seam — it keys
 the pulse buffers, fusion state, and every DB query. The prototype runs one
 session; keep new code session-scoped.

@@ -1,5 +1,6 @@
 // Paleta y tema oscuro, equivalentes a los del panel web.
 
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 class C {
@@ -32,7 +33,8 @@ ThemeData buildTheme() {
   final base = ThemeData(
     brightness: Brightness.dark,
     useMaterial3: true,
-    scaffoldBackgroundColor: C.bg,
+    // transparente: el fondo aurora (widgets/brand.dart) se pinta detrás de todas las pantallas
+    scaffoldBackgroundColor: Colors.transparent,
     colorScheme: const ColorScheme.dark(
       primary: C.cyan,
       secondary: C.violeta,
@@ -43,7 +45,7 @@ ThemeData buildTheme() {
   );
   return base.copyWith(
     appBarTheme: const AppBarTheme(
-      backgroundColor: C.bg,
+      backgroundColor: Colors.transparent,
       foregroundColor: C.text,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -66,8 +68,50 @@ ThemeData buildTheme() {
       ),
       labelStyle: const TextStyle(color: C.muted),
     ),
-    navigationBarTheme: const NavigationBarThemeData(backgroundColor: C.card, indicatorColor: Color(0x3338BDF8)),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: C.card.withValues(alpha: 0.82),
+      indicatorColor: const Color(0x3338BDF8),
+      indicatorShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (s) => TextStyle(
+          fontSize: 12,
+          fontWeight: s.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+          color: s.contains(WidgetState.selected) ? C.text : C.muted,
+        ),
+      ),
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+      },
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: C.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      showDragHandle: true,
+    ),
     snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating, backgroundColor: C.cardHi),
     textTheme: base.textTheme.apply(bodyColor: C.text, displayColor: C.text),
   );
 }
+
+/// Fondo de tarjeta "vidrio" sobre la aurora: gradiente translúcido, borde
+/// fino y sombra; con [accent] el borde y el halo toman ese color.
+BoxDecoration glassDecoration({Color? accent, double radius = 20}) => BoxDecoration(
+  gradient: LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [C.cardHi.withValues(alpha: 0.86), C.card.withValues(alpha: 0.74)],
+  ),
+  borderRadius: BorderRadius.circular(radius),
+  border: Border.all(color: accent?.withValues(alpha: 0.5) ?? C.border),
+  boxShadow: [
+    BoxShadow(
+      color: (accent ?? Colors.black).withValues(alpha: accent == null ? 0.35 : 0.25),
+      blurRadius: 30,
+      offset: const Offset(0, 14),
+      spreadRadius: -10,
+    ),
+  ],
+);
