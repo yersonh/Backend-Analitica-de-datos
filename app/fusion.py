@@ -5,7 +5,7 @@ RF05: un episodio de fatiga REAL exige evidencia en AMBOS canales al
 mismo tiempo. Por eso un `FatigueEvent` con status "alerta" solo se
 genera cuando hay señal visual (ojos/bostezo/cabeceo) Y señal
 fisiológica de somnolencia (caída relativa del pulso respecto al
-basal y/o baja variabilidad) frescas simultáneamente.
+basal; la baja variabilidad solo refuerza) frescas simultáneamente.
 
   - Solo un canal activo            -> status "vigilancia" (no confirmado)
   - Ambos canales activos           -> status "alerta"; risk_level según
@@ -150,12 +150,11 @@ class FusionEngine:
                 reasons.append("cabeceo sostenido")
 
         physiological_signal = False
-        if pulse and pulse.has_enough_data:
-            if pulse.relative_drop_signal:
-                physiological_signal = True
-                reasons.append("caída sostenida del pulso respecto al basal")
+        if pulse and pulse.has_enough_data and pulse.relative_drop_signal:
+            physiological_signal = True
+            reasons.append("caída sostenida del pulso respecto al basal")
+            # La baja variabilidad solo refuerza (sube el riesgo), no dispara sola
             if pulse.low_variability:
-                physiological_signal = True
                 reasons.append("baja variabilidad de pulso sostenida")
 
         implausible_reading = bool(pulse and pulse.implausible_reading)

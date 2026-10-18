@@ -34,7 +34,7 @@ import statistics
 import time
 
 WINDOW_SECONDS = 60           # ventana de análisis de HRV
-MIN_SAMPLES_FOR_ANALYSIS = 5
+MIN_SAMPLES_FOR_ANALYSIS = 15   # ~30 s de lecturas (1 cada 2 s) antes de evaluar
 LOW_VARIABILITY_STD = 1.5     # std de BPM muy baja y sostenida -> señal de somnolencia
 
 BASELINE_SAMPLE_COUNT = 20    # lecturas plausibles para fijar el basal personal
@@ -63,8 +63,10 @@ class PulseResult:
     physiological_drowsy_signal: bool = False  # = relative_drop_signal OR low_variability
 
     def __post_init__(self):
-        # Se mantiene la invariante aunque se construya el objeto a mano.
-        self.physiological_drowsy_signal = self.relative_drop_signal or self.low_variability
+        # Solo la caída sostenida respecto al basal es señal de somnolencia.
+        # La baja variabilidad sola da falsos positivos (el ESP32 envía BPM ya
+        # promediados); solo suma como razón extra en fusion.py.
+        self.physiological_drowsy_signal = self.relative_drop_signal
 
 
 class PulseAnalyzer:
@@ -86,7 +88,8 @@ class PulseAnalyzer:
             buffer.popleft()
 
     def _update_baseline(self, device_id: str, bpm: float, implausible: bool) -> float | None:
-        """Acumula lecturas plausibles hasta fijar el basal; luego lo deja fijo."""
+        """Acumula lecturas plausibles hasta fijar el basal; luego lo deja fijo.
+        Usa la mediana para que unas pocas lecturas con ruido no muevan el basal."""
         baseline = self._baselines.get(device_id)
         if baseline is not None or implausible:
             return baseline
@@ -94,18 +97,20 @@ class PulseAnalyzer:
         samples = self._baseline_samples.setdefault(device_id, [])
         samples.append(bpm)
         if len(samples) >= BASELINE_SAMPLE_COUNT:
-            baseline = round(statistics.mean(samples), 2)
+            baseline = round(statistics.median(samples), 2)
             self._baselines[device_id] = baseline
             del self._baseline_samples[device_id]
         return baseline
 
     def add_reading(self, device_id: str, bpm: float) -> PulseResult:
-        buffer = self._get_buffer(device_id)
-        buffer.append(PulseReading(bpm=bpm))
-        self._prune(buffer)
-
         implausible = bpm < PLAUSIBLE_BPM_MIN or bpm > PLAUSIBLE_BPM_MAX
         baseline = self._update_baseline(device_id, bpm, implausible)
+
+        buffer = self._get_buffer(device_id)
+        if not implausible:
+            # Una lectura imposible es error del sensor: no entra a la ventana
+            buffer.append(PulseReading(bpm=bpm))
+        self._prune(buffer)
 
         if len(buffer) < MIN_SAMPLES_FOR_ANALYSIS:
             return PulseResult(
@@ -117,12 +122,14 @@ class PulseAnalyzer:
 
         values = [r.bpm for r in buffer]
         mean_bpm = round(statistics.mean(values), 2)
+        median_bpm = round(statistics.median(values), 2)
         std_bpm = round(statistics.pstdev(values), 2)
 
         low_variability = std_bpm < LOW_VARIABILITY_STD
+        # Caída sostenida: la MEDIANA de los últimos 60 s, robusta a picos de ruido
         relative_drop = (
             baseline is not None
-            and mean_bpm <= baseline * (1 - RELATIVE_DROP_THRESHOLD)
+            and median_bpm <= baseline * (1 - RELATIVE_DROP_THRESHOLD)
         )
 
         return PulseResult(
