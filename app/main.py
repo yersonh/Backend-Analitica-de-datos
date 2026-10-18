@@ -38,7 +38,7 @@ App móvil (Flutter, carpeta mobile/): autenticación con token Bearer.
   GET  /api/config             -> umbrales, roles y parámetros del panel.
 
 /frame y /pulso no usan login: se autentican con la cabecera X-Device-Key
-(DEVICE_API_KEY). El resto exige sesión iniciada y el permiso del endpoint.
+(DEVICE_API_KEY). GET /estado acepta tanto sesión iniciada como esa cabecera. El resto exige sesión iniciada y el permiso del endpoint.
 
 Ejecutar en desarrollo:
   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -250,9 +250,16 @@ def get_events(session_id: str | None = None, limit: int = 200, user: User = Dep
 
 
 @app.get("/estado")
-def get_status(session_id: str | None = None, user: User = Depends(require("panel"))):
-    """Estado actual de la fusión en tiempo real (RF09, RF10)."""
-    session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
+def get_status(request: Request, session_id: str | None = None):
+    """Estado actual de la fusión en tiempo real (RF09, RF10).
+
+    Acepta sesión iniciada (panel) o la cabecera X-Device-Key (ESP32 del pulso,
+    que consulta aquí si debe activar la alerta)."""
+    if auth.is_device(request):
+        session_id = session_id or DEFAULT_SESSION_ID
+    else:
+        user = require("panel")(request)
+        session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
     status = fusion_engine.get_current_status(session_id)
     status["normal_count"] = database.normal_reading_count(session_id=session_id)
     # Tras reiniciar el servidor la memoria está vacía: se envía lo último guardado

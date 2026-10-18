@@ -331,6 +331,15 @@ def require_device(request: Request) -> None:
         raise LoginRequired()
 
 
+def is_device(request: Request) -> bool:
+    """True si la petición trae una X-Device-Key válida (usado por GET /estado,
+    para que el ESP32 del pulso pueda consultar la alerta sin iniciar sesión)."""
+    if DEVICE_API_KEY is None:
+        return False
+    key = request.headers.get("x-device-key", "")
+    return bool(key) and hmac.compare_digest(key.encode(), DEVICE_API_KEY.encode())
+
+
 # ---------------------------------------------------------------------------
 # Login con bloqueo por intentos fallidos (en memoria, como el resto del estado)
 # ---------------------------------------------------------------------------
