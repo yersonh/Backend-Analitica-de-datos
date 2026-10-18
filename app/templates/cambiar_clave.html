@@ -5,13 +5,13 @@
         .wrap { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; }
         .card { width: min(460px, 100%); padding: 32px 30px 28px; animation: fadeUp 0.7s both; }
         .head { display: flex; align-items: center; gap: 14px; }
-        .head .ico { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; color: var(--cyan); background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.3); flex: none; }
+        .head .ico { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; color: var(--cyan); background: rgba(108, 111, 214,0.12); border: 1px solid rgba(108, 111, 214,0.3); flex: none; }
         .head .ico svg { width: 24px; height: 24px; }
         .head h1 { margin: 0; font-size: 1.4rem; }
         .head .who { font-size: 0.82rem; color: var(--muted); margin-top: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         form { display: grid; gap: 16px; margin-top: 22px; }
         .meter { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 8px; }
-        .meter i { height: 4px; border-radius: 4px; background: rgba(140,180,255,0.12); transition: background 0.3s; }
+        .meter i { height: 4px; border-radius: 4px; background: rgba(108, 111, 214,0.12); transition: background 0.3s; }
         .meter-label { font-size: 0.74rem; color: var(--muted); margin-top: 5px; min-height: 1em; }
         .match { font-size: 0.74rem; margin-top: 5px; min-height: 1em; }
         .actions { display: flex; gap: 10px; margin-top: 6px; }
@@ -85,7 +85,7 @@
         const MIN = {{ min_password }};
         const nueva = document.getElementById("nueva"), conf = document.getElementById("confirmar");
         const bars = document.querySelectorAll(".meter i"), label = document.getElementById("meter-label");
-        const LEVELS = [["#fb7185", "Muy débil"], ["#fb923c", "Débil"], ["#fbbf24", "Aceptable"], ["#34d399", "Fuerte"]];
+        const LEVELS = [["#e0607e", "Muy débil"], ["#e58a4a", "Débil"], ["#d99a2b", "Aceptable"], ["#3ea88c", "Fuerte"]];
         function score(p) {
             if (p.length < MIN) return 0;
             let s = 1;

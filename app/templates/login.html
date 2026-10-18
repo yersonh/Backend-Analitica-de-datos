@@ -11,19 +11,19 @@
         .brand .logo-row { display: flex; align-items: center; gap: 14px; }
         .brand .logo-row b {
             font-size: 1.5rem; letter-spacing: 0.32em;
-            background: linear-gradient(90deg, #fff, var(--cyan), var(--violeta));
+            background: linear-gradient(90deg, var(--ink), var(--cyan), var(--violeta));
             -webkit-background-clip: text; background-clip: text; color: transparent;
         }
         .brand h1 {
             font-size: clamp(2.4rem, 5vw, 3.9rem); line-height: 1.04; letter-spacing: -0.02em; margin: 34px 0 16px;
-            background: linear-gradient(120deg, #fff 0%, #bae6fd 45%, var(--violeta));
+            background: linear-gradient(120deg, var(--ink) 0%, #4a4fb5 45%, var(--violeta));
             -webkit-background-clip: text; background-clip: text; color: transparent;
         }
         .brand p { color: var(--ink-2); font-size: 1.05rem; line-height: 1.6; max-width: 46ch; margin: 0; }
         .features { display: grid; gap: 12px; margin-top: 32px; max-width: 460px; }
         .feature {
             display: flex; gap: 14px; align-items: center; padding: 13px 16px; border-radius: 16px;
-            background: rgba(5, 10, 24, 0.45); border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.6); border: 1px solid var(--line);
             animation: fadeUp 0.7s both; animation-delay: calc(0.25s + var(--i) * 0.12s);
         }
         .feature .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
@@ -62,11 +62,11 @@
     <section class="brand" aria-hidden="false">
         <div class="logo-row">
             <svg class="scan" viewBox="0 0 58 58" aria-hidden="true">
-                <defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>
+                <defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="#6c6fd6"/><stop offset="1" stop-color="#9b7ad8"/></linearGradient></defs>
                 <g class="ring"><circle cx="29" cy="29" r="27" fill="none" stroke="url(#lg)" stroke-width="1.5" stroke-dasharray="3 7"/></g>
                 <g class="lid">
-                    <path d="M8 29 C17 16 41 16 50 29 C41 42 17 42 8 29Z" fill="rgba(3,7,18,0.6)" stroke="url(#lg)" stroke-width="2.6"/>
-                    <circle cx="29" cy="29" r="7.5" fill="url(#lg)"/><circle cx="29" cy="29" r="3" fill="#030712"/><circle cx="31.5" cy="26.5" r="1.8" fill="#fff"/>
+                    <path d="M8 29 C17 16 41 16 50 29 C41 42 17 42 8 29Z" fill="rgba(255,255,255,0.9)" stroke="url(#lg)" stroke-width="2.6"/>
+                    <circle cx="29" cy="29" r="7.5" fill="url(#lg)"/><circle cx="29" cy="29" r="3" fill="#1e2147"/><circle cx="31.5" cy="26.5" r="1.8" fill="#fff"/>
                 </g>
             </svg>
             <b>SIDFAM</b>
