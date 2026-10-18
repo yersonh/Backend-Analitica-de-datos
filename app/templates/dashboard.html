@@ -1684,7 +1684,7 @@
         }
 
         function renderCluster(c, params) {
-            if (!c.disponible) return `<section class="an-panel glass" id="clustering"><h2>4a · Clustering K-Means</h2><div class="empty">${esc(c.mensaje)}</div></section>`;
+            if (!c.disponible) return "";   // sin datos suficientes: la sección no se muestra
             const L = params.etiquetas_variables;
             const names = c.grupos.map(g => g.nombre);
             const vars = Object.keys(L);
@@ -1732,7 +1732,7 @@
         }
 
         function renderClassify(k) {
-            if (!k.disponible) return `<section class="an-panel glass" id="clasificacion"><h2>4b · Clasificación con árbol de decisión</h2><div class="empty">${esc(k.mensaje)}${k.fuente_etiqueta ? "<br>Etiqueta: " + esc(k.fuente_etiqueta) : ""}</div></section>`;
+            if (!k.disponible) return "";
             const m = k.metricas, cm = k.matriz_confusion.valores;
             const maxCm = Math.max(...cm.flat(), 1);
             const cell = (v, ok) => `<td style="background:${ok ? "rgba(74,222,128," : "rgba(251,113,133,"}${0.12 + 0.6 * v / maxCm})">${v}</td>`;
@@ -1779,28 +1779,13 @@
             });
         }
 
-        function renderCrisp(fases) {
-            if (!fases.length) return "";
-            return `<section class="an-panel glass" id="crisp">
-                <h2>Metodología CRISP-DM · resumen por fase</h2>
-                <p class="lead">Cada fase resume lo que se hizo y lo que salió con los datos de esta sesión. ✓ = en orden, ⚠ = algo a mejorar.</p>
-                <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${fases.map(f => `
-                    <div class="kpi" style="text-align:left">
-                        <div class="label">${f.estado === "ok" ? "✓" : "⚠"} Fase ${f.numero} · ${esc(f.fase)}</div>
-                        <div class="hint" style="margin:4px 0 6px"><i>${esc(f.pregunta)}</i></div>
-                        ${f.hallazgos.map(h => `<div class="hint" style="margin-top:4px">• ${esc(h)}</div>`).join("")}
-                    </div>`).join("")}
-                </div>
-            </section>`;
-        }
-
         function coefTable(rows, logistic) {
             return `<div class="table-wrap"><table><thead><tr><th>Variable</th><th>Coeficiente (por 1 DE)</th>${logistic ? "<th>Odds ratio</th>" : ""}<th>Efecto</th></tr></thead><tbody>` +
                 rows.map(r => `<tr><td>${esc(r.variable)}</td><td>${n(r.coeficiente, 3)}</td>${logistic ? `<td>× ${n(r.odds_ratio, 2)}</td>` : ""}<td>${r.efecto === "aumenta" ? "↑ aumenta" : "↓ reduce"}</td></tr>`).join("") + `</tbody></table></div>`;
         }
 
         function renderRegression(g) {
-            if (!g.disponible) return `<section class="an-panel glass" id="regresion"><h2>4d · Regresión logística / lineal</h2><div class="empty">${esc(g.mensaje)}</div></section>`;
+            if (!g.disponible) return "";
             const L = g.logistica, R = g.lineal;
             const elegido = g.modelo_elegido === "lineal" ? "Regresión lineal" : "Regresión logística";
             let html = `<section class="an-panel glass" id="regresion">
@@ -1863,7 +1848,7 @@
         }
 
         function renderAnomalies(a, params) {
-            if (!a.disponible) return `<section class="an-panel glass" id="anomalias"><h2>4c · Detección de anomalías</h2><div class="empty">${esc(a.mensaje)}</div></section>`;
+            if (!a.disponible) return "";
             const L = params.etiquetas_variables;
             const rows = a.anomalias.map(r => `<tr><td>${esc((r.timestamp || "").replace("T", " "))}</td><td>${esc(r.estado_fusion)}</td><td>${esc(r.variable_mas_atipica)}</td><td>${n(r.puntaje_anomalia, 3)}</td><td>${n(r.ear_mean, 3)}</td><td>${n(r.perclos, 1)}</td><td>${n(r.yawn_count, 0)}</td><td>${n(r.tilt_abs_mean, 1)}</td><td>${n(r.bpm_mean, 1)}</td><td>${n(r.bpm_drop_pct, 1)}</td></tr>`).join("");
             return `
@@ -1907,9 +1892,9 @@
                     box.innerHTML = `<section class="an-panel glass"><div class="empty">${esc(r.mensaje)}<br><br>Deja los ESP32 enviando datos unos minutos y presiona <b>Recalcular</b>.</div></section>`;
                     return;
                 }
-                box.innerHTML = renderCrisp(r.crisp_dm || []) + renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
+                box.innerHTML = renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
                     renderCluster(r.clustering, r.parametros) + renderClassify(r.clasificacion) +
-                    renderRegression(r.regresion || { disponible: false, mensaje: "" }) + renderAnomalies(r.anomalias, r.parametros);
+                    renderAnomalies(r.anomalias, r.parametros) + renderRegression(r.regresion || { disponible: false, mensaje: "" });
                 chartsDescriptive(r.descriptiva);
                 chartsCluster(r.clustering);
                 chartsClassify(r.clasificacion);
