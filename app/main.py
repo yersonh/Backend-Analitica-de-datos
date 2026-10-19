@@ -10,6 +10,7 @@ Endpoints:
   GET  /estado     -> estado actual de la fusión en tiempo real (JSON).
   GET  /api/flota  -> todos los conductores con su estado, para supervisores (JSON).
   GET  /api/camara -> último frame de la cámara con la vista del modelo (JPEG).
+  GET  /api/camara/stream -> la misma cámara como video en vivo (MJPEG), para el panel web.
   POST /api/buzzer -> un supervisor hace sonar el buzzer del conductor.
   GET  /            -> dashboard HTML (RF09, RF10).
 
@@ -44,6 +45,7 @@ Ejecutar en desarrollo:
   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import io
 import time
 from datetime import datetime
@@ -282,6 +284,33 @@ def get_camera_frame(session_id: str | None = None, user: User = Depends(require
     return Response(frame[0], media_type="image/jpeg", headers={
         "Cache-Control": "no-store",
         "X-Frame-Age": f"{time.time() - frame[1]:.1f}",
+    })
+
+
+@app.get("/api/camara/stream")
+async def stream_camera(request: Request, session_id: str | None = None, user: User = Depends(require("panel"))):
+    """Cámara en vivo como video MJPEG (multipart/x-mixed-replace): una sola
+    conexión por la que se empuja cada frame nuevo apenas llega del ESP32-CAM.
+    El navegador lo reproduce como video en un <img>. La fluidez la marca el
+    ritmo de envío del ESP32 (~3 fps). El stream se cierra si deja de haber
+    frames durante CAMERA_STALE_SECONDS; el panel lo vuelve a abrir solo."""
+    session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
+
+    async def frames():
+        last_ts = 0.0
+        while not await request.is_disconnected():
+            frame = _live_frames.get(session_id)
+            if not frame or time.time() - frame[1] > CAMERA_STALE_SECONDS:
+                break
+            if frame[1] != last_ts:
+                last_ts = frame[1]
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                       + str(len(frame[0])).encode() + b"\r\n\r\n" + frame[0] + b"\r\n")
+            await asyncio.sleep(0.05)
+
+    return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame", headers={
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",   # que ningún proxy acumule los frames
     })
 
 

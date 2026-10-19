@@ -336,6 +336,20 @@
         .scanner.no-face .noface { opacity: 1; animation: flicker 1.4s steps(2) infinite; }
         .scanner.no-face .eye-g { opacity: 0.25; }
         @keyframes flicker { 50% { opacity: 0.4; } }
+        /* Cámara en vivo dentro del escáner */
+        .live-cam { display: none; position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 18px; overflow: hidden;
+            background: #1e2147; border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+            box-shadow: 0 18px 40px -18px color-mix(in srgb, var(--accent) 70%, transparent); transition: border-color 0.8s, box-shadow 0.8s; }
+        .live-cam img { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .cam-badge { position: absolute; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em;
+            color: #fff; background: rgba(224, 96, 126, 0.9); }
+        .cam-badge i { width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: flicker 1.2s steps(2) infinite; }
+        .scanner.has-cam { max-width: 460px; aspect-ratio: auto; display: grid; align-content: center; padding-bottom: 34px; }
+        .scanner.has-cam svg { display: none; }
+        .scanner.has-cam .live-cam { display: block; }
+        .scanner.has-cam .noface { bottom: 34px; background: rgba(30, 33, 71, 0.35); border-radius: 18px; color: #ffd27a; }
+        .scanner.has-cam .tag { bottom: 0; }
 
         /* ================= Pulso ================= */
         .pulse-card { display: flex; flex-direction: column; }
@@ -779,6 +793,11 @@
                             </g>
                         </g></g>
                     </svg>
+                    <!-- Cámara en vivo (MJPEG): reemplaza al ojo animado mientras lleguen frames -->
+                    <div class="live-cam">
+                        <img id="cam-img" alt="Cámara en vivo del conductor con la vista del modelo">
+                        <span class="cam-badge"><i></i>EN VIVO</span>
+                    </div>
                     <div class="noface">SIN ROSTRO</div>
                     <div class="tag" id="scan-tag">APERTURA —</div>
                 </div>
@@ -1330,6 +1349,7 @@
             else if (s.ear != null) open = clamp(s.ear / 0.32, 0.15, 1.05);
             $("eye-g").style.transform = `scaleY(${open})`;
             $("scan-tag").textContent = s.face_detected === false ? "BUSCANDO ROSTRO…" : (s.ear != null ? `APERTURA ${Math.round(clamp(s.ear / 0.32, 0, 1) * 100)}%` : "APERTURA —");
+            setCamera(!!s.camara_activa);
 
             // pulso
             const bpm = s.bpm;
@@ -1512,6 +1532,20 @@
             if (!r.ok) throw new Error("HTTP " + r.status);
             return r.json();
         }
+        // Cámara en vivo: mientras /estado diga que llegan frames se mantiene abierto
+        // el stream MJPEG (el navegador lo muestra como video); si no, vuelve el ojo.
+        let camOn = false;
+        function setCamera(on) {
+            if (on === camOn) return;
+            camOn = on;
+            const img = $("cam-img");
+            if (on) img.src = `/api/camara/stream?${q}&t=${Date.now()}`;
+            else img.removeAttribute("src");   // cierra la conexión
+            $("scanner").classList.toggle("has-cam", on);
+        }
+        // Si el stream se corta (red, reinicio del servidor), el siguiente sondeo lo reabre
+        $("cam-img").addEventListener("error", () => { if (camOn) { camOn = false; $("scanner").classList.remove("has-cam"); } });
+
         async function pollStatus() {
             try { applyStatus(await getJSON(`/estado?${q}`)); }
             catch (err) { $("live").classList.add("stale"); $("live-text").textContent = "Sin conexión"; }

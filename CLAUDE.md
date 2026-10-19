@@ -190,7 +190,10 @@ matching sketch.
 **Live camera and buzzer** (`app/main.py`, in memory only): `/frame` stores the
 last frame per session already annotated by `app/overlay.py` (mesh, eye/mouth
 contours, EAR/MAR/tilt, fusion banner); `GET /api/camara` serves it as JPEG (204
-when stale > `CAMERA_STALE_SECONDS`). `buzzer` is true while the fusion status is
+when stale > `CAMERA_STALE_SECONDS`) and `GET /api/camara/stream` pushes each new
+frame as MJPEG (`multipart/x-mixed-replace`, closes when stale). The web
+dashboard shows that stream in the hero's eye scanner while `/estado`
+reports `camara_activa`. `buzzer` is true while the fusion status is
 `alerta` or for the seconds a supervisor requested via `POST /api/buzzer`
 (permission `todas_sesiones`); `/estado` exposes `buzzer`, `buzzer_auto`,
 `buzzer_manual_seg` and `camara_activa`. A restart clears frames and pending
