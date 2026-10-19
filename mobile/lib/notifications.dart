@@ -1,8 +1,8 @@
-// Notificaciones del sistema para el supervisor: avisan de episodios de fatiga
-// de cualquier conductor aunque la app esté en segundo plano o con la pantalla
-// bloqueada. No usa servicios externos (Firebase): mientras el supervisor tiene
-// la sesión abierta corre un servicio en primer plano ("vigilando la flota")
-// para que Android no congele la app y la flota siga consultando al servidor.
+// Notificaciones del sistema: avisan de somnolencia (conductor) y de episodios
+// de cualquier conductor (supervisor) aunque la app esté en segundo plano o con
+// la pantalla bloqueada. No usa servicios externos (Firebase): mientras hay una
+// sesión abierta corre un servicio en primer plano para que Android no congele
+// la app y siga consultando al servidor.
 
 import 'dart:io' show Platform;
 
@@ -16,15 +16,19 @@ class Notifier {
   static bool _ready = false;
   static int _nextId = 1;
 
-  static const _channel = AndroidNotificationDetails(
-    'sidfam_alertas',
-    'Alertas de fatiga',
-    channelDescription: 'Episodios de fatiga y advertencias de sensor de los conductores',
+  // Canal nuevo (Android no deja cambiar la vibración de un canal ya creado):
+  // suena y vibra fuerte aunque la pantalla esté bloqueada.
+  static final _channel = AndroidNotificationDetails(
+    'sidfam_somnolencia',
+    'Alertas de somnolencia',
+    channelDescription: 'Somnolencia detectada, episodios de fatiga y advertencias de sensor',
     importance: Importance.max,
     priority: Priority.high,
     category: AndroidNotificationCategory.alarm,
-    color: Color(0xFFE0607E),
+    color: const Color(0xFFE0607E),
     ticker: 'SIDFAM',
+    enableVibration: true,
+    vibrationPattern: Int64List.fromList([0, 900, 300, 900, 300, 900]),
   );
 
   static Future<void> init() async {
@@ -83,15 +87,19 @@ class Notifier {
       id: _nextId++,
       title: title,
       body: body,
-      notificationDetails: const NotificationDetails(
+      notificationDetails: NotificationDetails(
         android: _channel,
-        iOS: DarwinNotificationDetails(presentSound: true, interruptionLevel: InterruptionLevel.timeSensitive),
+        iOS: const DarwinNotificationDetails(presentSound: true, interruptionLevel: InterruptionLevel.timeSensitive),
       ),
     );
   }
 
-  /// Supervisor con sesión abierta: mantiene viva la app en segundo plano.
-  static Future<void> startWatching() async {
+  /// Con sesión abierta (supervisor o conductor): mantiene viva la app en
+  /// segundo plano para poder avisar de somnolencia con la pantalla bloqueada.
+  static Future<void> startWatching({
+    String title = 'SIDFAM · vigilando la flota',
+    String text = 'Te avisará si un conductor muestra signos de fatiga',
+  }) async {
     if (kIsWeb || !Platform.isAndroid) return;
     try {
       if (await FlutterForegroundTask.isRunningService) return;
@@ -99,8 +107,8 @@ class Notifier {
         // Android 14+ detiene el servicio si no se declara su tipo al iniciarlo
         serviceTypes: [ForegroundServiceTypes.dataSync],
         notificationIcon: const NotificationIcon(metaDataName: 'co.sidfam.NOTIFICATION_ICON'),
-        notificationTitle: 'SIDFAM · vigilando la flota',
-        notificationText: 'Te avisará si un conductor muestra signos de fatiga',
+        notificationTitle: title,
+        notificationText: text,
       );
     } catch (e) {
       debugPrint('No se pudo iniciar la vigilancia en segundo plano: $e');

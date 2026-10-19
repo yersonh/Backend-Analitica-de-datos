@@ -248,6 +248,8 @@ def get_events(session_id: str | None = None, limit: int = 200, user: User = Dep
     return {
         "events": database.list_events(session_id=session_id, limit=limit),
         "counts_by_risk": database.event_counts_by_risk(session_id=session_id),
+        # minutos normales recientes, ya resumidos (uno por minuto, máximo 20)
+        "normales": database.normal_minutes(session_id),
     }
 
 

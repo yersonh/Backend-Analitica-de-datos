@@ -29,6 +29,9 @@ class LiveController extends ChangeNotifier {
   String? error;
 
   List<Map<String, dynamic>> events = [];
+
+  /// Minutos recientes sin alerta, ya resumidos por el servidor (máx. 20).
+  List<Map<String, dynamic>> normales = [];
   Map<String, dynamic> counts = {};
   Set<int> freshIds = {};
   int? _maxId;
@@ -45,13 +48,15 @@ class LiveController extends ChangeNotifier {
 
   String? get session => _session;
 
-  void start() {
+  /// [background]: con la app minimizada se consulta más despacio, lo justo
+  /// para avisar de somnolencia sin gastar batería.
+  void start({bool background = false}) {
     stop();
     _session = app.sessionId;
     _pollStatus();
     _pollEvents();
-    _statusTimer = Timer.periodic(statusEvery, (_) => _pollStatus());
-    _eventsTimer = Timer.periodic(eventsEvery, (_) => _pollEvents());
+    _statusTimer = Timer.periodic(background ? const Duration(seconds: 4) : statusEvery, (_) => _pollStatus());
+    _eventsTimer = Timer.periodic(background ? const Duration(seconds: 10) : eventsEvery, (_) => _pollEvents());
   }
 
   void stop() {
@@ -64,6 +69,7 @@ class LiveController extends ChangeNotifier {
   void reset() {
     status = null;
     events = [];
+    normales = [];
     counts = {};
     freshIds = {};
     _maxId = null;
@@ -109,6 +115,7 @@ class LiveController extends ChangeNotifier {
       if (session != _session) return;
       final next = ((data['events'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
       counts = ((data['counts_by_risk'] as Map?) ?? const {}).cast<String, dynamic>();
+      normales = ((data['normales'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
 
       final fresh = <int>{};
       if (_maxId != null) {

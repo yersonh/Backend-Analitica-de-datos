@@ -34,7 +34,7 @@ conexión por operación (patrón contextmanager) en vez de un pool.
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -489,6 +489,37 @@ def list_sessions() -> list[dict]:
                 r[k] = r[k].isoformat(timespec="seconds")
         r["lecturas"] = int(r["lecturas"])
     return rows
+
+
+def normal_minutes(session_id: str, limit: int = 20, hours: int = 24) -> list[dict]:
+    """Minutos recientes SIN alerta ni advertencia de sensor, uno por fila, con el
+    EAR y el BPM medios. Resume las lecturas normales para el historial sin
+    mandar cada frame (serían miles por hora)."""
+    minute = ("to_char(timestamp, 'YYYY-MM-DD\"T\"HH24:MI')" if USE_POSTGRES
+              else "substr(timestamp, 1, 16)")
+    since = datetime.now() - timedelta(hours=hours)
+    since = since if USE_POSTGRES else since.isoformat(timespec="seconds")
+    sql = f"""
+        SELECT {minute} AS minuto, COUNT(*) AS lecturas,
+               AVG(CASE WHEN source = 'frame' AND face_detected = 1 THEN ear END) AS ear,
+               AVG(CASE WHEN source = 'pulso' THEN bpm END) AS bpm,
+               SUM(CASE WHEN fusion_status IN ('alerta', 'advertencia_sensor') THEN 1 ELSE 0 END) AS malas
+        FROM sensor_readings
+        WHERE session_id = ? AND timestamp >= ?
+        GROUP BY {minute}
+        HAVING SUM(CASE WHEN fusion_status IN ('alerta', 'advertencia_sensor') THEN 1 ELSE 0 END) = 0
+        ORDER BY minuto DESC LIMIT ?
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph(sql), (session_id, since, limit))
+        rows = [dict(r) for r in cur.fetchall()]
+    return [{
+        "timestamp": r["minuto"],
+        "lecturas": int(r["lecturas"]),
+        "ear": round(float(r["ear"]), 3) if r["ear"] is not None else None,
+        "bpm": round(float(r["bpm"]), 1) if r["bpm"] is not None else None,
+    } for r in rows]
 
 
 # ---------------------------------------------------------------------------

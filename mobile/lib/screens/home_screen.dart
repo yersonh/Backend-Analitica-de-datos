@@ -2,6 +2,8 @@
 // menú de usuario), navegación inferior según permisos y alertas de eventos
 // nuevos (equivalen a los toasts + pitido del panel web).
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -46,30 +48,79 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
   int _tab = 0;
   bool _foreground = true;
 
+  // Alerta de somnolencia: se dispara al PASAR a "alerta" (no en cada sondeo).
+  String? _lastStatus;
+  bool _alarmVisible = false;
+  String _alarmTitle = '';
+  String _alarmDetail = '';
+  Timer? _buzz;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _session = _app.sessionId;
     _app.addListener(_onApp);
+    _live.addListener(_onLive);
     _live.start();
-    if (_fleet != null) {
-      _fleet.start();
-      Notifier.requestPermission().then((_) => Notifier.startWatching());
-    }
+    _fleet?.start();
+    // todos los roles: permiso de notificaciones y vigilancia en segundo plano
+    Notifier.requestPermission().then(
+      (_) => _fleet != null
+          ? Notifier.startWatching()
+          : Notifier.startWatching(
+              title: 'SIDFAM · monitoreando tu sesión',
+              text: 'Te avisará si detecta somnolencia',
+            ),
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _app.removeListener(_onApp);
+    _live.removeListener(_onLive);
     _live.dispose();
-    if (_fleet != null) {
-      _fleet.dispose();
-      Notifier.stopWatching(); // al cerrar sesión deja de vigilar
-    }
+    _fleet?.dispose();
+    _buzz?.cancel();
+    Notifier.stopWatching(); // al cerrar sesión deja de vigilar
     _fade.dispose();
     super.dispose();
+  }
+
+  void _onLive() {
+    final s = _live.status;
+    // solo cuenta el estado en vivo (no lo "guardado" tras un reinicio del servidor)
+    final now = s != null && s['data_is_fresh'] == true && s['saved'] != true ? s['status'] as String? : null;
+    if (now == 'alerta' && _lastStatus != 'alerta') _drowsyAlert(s!);
+    if (now != 'alerta' && _alarmVisible) _dismissAlarm();
+    _lastStatus = now;
+  }
+
+  void _drowsyAlert(Map<String, dynamic> s) {
+    final alto = s['risk_level'] == 'alto';
+    final quien = _fleet?.driverFor(_app.sessionId)?['conductor'];
+    final title = '${quien != null ? '$quien · ' : ''}¡Somnolencia detectada!${alto ? ' · Riesgo alto' : ''}';
+    final detail = (s['detail'] as String?)?.isNotEmpty == true
+        ? s['detail'] as String
+        : 'Señal visual y de pulso al mismo tiempo';
+    // notificación del sistema: suena y vibra también con la app minimizada o la pantalla bloqueada
+    Notifier.show(title, '$detail. Detente en un lugar seguro y descansa.');
+    if (!mounted) return;
+    setState(() {
+      _alarmVisible = true;
+      _alarmTitle = title;
+      _alarmDetail = detail;
+    });
+    HapticFeedback.heavyImpact();
+    _buzz?.cancel();
+    _buzz = Timer.periodic(const Duration(seconds: 2), (_) => HapticFeedback.heavyImpact());
+  }
+
+  void _dismissAlarm() {
+    _buzz?.cancel();
+    _buzz = null;
+    if (mounted) setState(() => _alarmVisible = false);
   }
 
   @override
@@ -80,21 +131,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
       _live.start();
       _fleet?.start();
     } else if (state == AppLifecycleState.paused) {
-      _live.stop();
-      // la flota sigue (más despacio) para que el supervisor reciba notificaciones
-      _fleet?.start(background: true);
+      if (_fleet != null) {
+        _live.stop();
+        // la flota sigue (más despacio) para que el supervisor reciba notificaciones
+        _fleet.start(background: true);
+      } else {
+        // el conductor sigue vigilado (más despacio) para avisarle de somnolencia
+        _live.start(background: true);
+      }
     }
   }
 
   void _onApp() {
     if (_app.sessionId != _session) {
       _session = _app.sessionId;
+      _lastStatus = null;
+      _dismissAlarm();
       _live.reset();
     }
   }
 
   void _alert(List<Map<String, dynamic>> nuevos) {
     if (!mounted) return;
+    // conductor con la app minimizada: la somnolencia ya la avisa _drowsyAlert;
+    // aquí solo faltan las advertencias de sensor
+    if (!_foreground && _fleet == null) {
+      for (final e in nuevos.where((e) => e['risk_level'] == 'advertencia_sensor')) {
+        Notifier.show('Revisa el sensor de pulso', '${e['detail'] ?? ''}');
+      }
+    }
     final messenger = ScaffoldMessenger.of(context);
     for (final e in nuevos) {
       final r = riskStyle(e['risk_level'] as String?);
@@ -287,12 +352,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
       ),
       // Solo se dibuja la pestaña activa (las demás conservan su estado pero no
       // animan: TickerMode). Al cambiar, la nueva entra con un fundido corto.
-      body: FadeTransition(
-        opacity: CurvedAnimation(parent: _fade, curve: Curves.easeOut),
-        child: IndexedStack(
-          index: _tab,
-          children: [for (var i = 0; i < tabs.length; i++) TickerMode(enabled: i == _tab, child: tabs[i].$3)],
-        ),
+      body: Stack(
+        children: [
+          FadeTransition(
+            opacity: CurvedAnimation(parent: _fade, curve: Curves.easeOut),
+            child: IndexedStack(
+              index: _tab,
+              children: [for (var i = 0; i < tabs.length; i++) TickerMode(enabled: i == _tab, child: tabs[i].$3)],
+            ),
+          ),
+          // aviso de somnolencia encima de cualquier pestaña
+          Align(
+            alignment: Alignment.topCenter,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, child: child),
+              child: _alarmVisible
+                  ? _DrowsyBanner(title: _alarmTitle, detail: _alarmDetail, onAck: _dismissAlarm)
+                  : const SizedBox.shrink(),
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
@@ -302,6 +382,69 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
           _fade.forward(from: 0);
         },
         destinations: [for (final t in tabs) NavigationDestination(icon: Icon(t.$2), label: t.$1)],
+      ),
+    );
+  }
+}
+
+/// Aviso rojo grande de somnolencia (el sonido lo da la notificación del sistema).
+class _DrowsyBanner extends StatelessWidget {
+  const _DrowsyBanner({required this.title, required this.detail, required this.onAck});
+  final String title;
+  final String detail;
+  final VoidCallback onAck;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [C.rojo, Color(0xFFC2456A)]),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: C.rojo.withValues(alpha: 0.45),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
+              spreadRadius: -6,
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 30),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(detail, style: TextStyle(color: Colors.white.withValues(alpha: 0.92))),
+            const SizedBox(height: 4),
+            const Text(
+              'Detente en un lugar seguro y descansa.',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: onAck,
+                style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: C.rojo),
+                child: const Text('Entendido'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

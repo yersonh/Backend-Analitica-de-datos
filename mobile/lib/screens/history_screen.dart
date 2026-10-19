@@ -36,12 +36,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const filters = {'all': 'Todos', 'alto': 'Alto', 'medio': 'Medio', 'advertencia_sensor': 'Sensor'};
+    const filters = {
+      'all': 'Todos',
+      'normal': 'Normal',
+      'alto': 'Alto',
+      'medio': 'Medio',
+      'advertencia_sensor': 'Sensor',
+    };
     return ListenableBuilder(
       listenable: widget.live,
       builder: (context, _) {
         final events = widget.live.events;
-        final list = events.where((e) => _filter == 'all' || e['risk_level'] == _filter).toList();
+        // Alertas + minutos normales (el servidor manda pocos y ya resumidos)
+        // en una sola línea de tiempo, del más reciente al más antiguo.
+        final normales = [for (final n in widget.live.normales) {...n, 'risk_level': 'normal'}];
+        final all = [...events, ...normales]
+          ..sort((a, b) {
+            final ta = parseTs(a['timestamp']), tb = parseTs(b['timestamp']);
+            if (ta == null || tb == null) return 0;
+            return tb.compareTo(ta);
+          });
+        final list = all.where((e) => _filter == 'all' || e['risk_level'] == _filter).toList();
         return Column(
           children: [
             SizedBox(
@@ -65,20 +80,59 @@ class _HistoryScreenState extends State<HistoryScreen> {
             Expanded(
               child: list.isEmpty
                   ? EmptyState(
-                      events.isEmpty
-                          ? 'Aún no se han registrado episodios de fatiga. ¡Buen viaje!'
-                          : 'No hay episodios con este filtro.',
+                      all.isEmpty
+                          ? 'Todavía no hay lecturas de esta sesión.'
+                          : _filter == 'normal'
+                          ? 'No hay minutos normales en las últimas 24 h.'
+                          : 'No hay episodios con este filtro. ¡Buen viaje!',
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
                       itemCount: list.length,
-                      itemBuilder: (context, i) =>
-                          EventTile(event: list[i], fresh: widget.live.freshIds.contains(list[i]['id'])),
+                      itemBuilder: (context, i) => list[i]['risk_level'] == 'normal'
+                          ? NormalTile(minute: list[i])
+                          : EventTile(event: list[i], fresh: widget.live.freshIds.contains(list[i]['id'])),
                     ),
             ),
           ],
         );
       },
+    );
+  }
+}
+
+/// Un minuto sin alertas: fila compacta en verde con EAR y BPM medios.
+class NormalTile extends StatelessWidget {
+  const NormalTile({super.key, required this.minute});
+  final Map<String, dynamic> minute;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = minute;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: C.verde.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: C.verde.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle_outline, color: C.verde, size: 20),
+          const SizedBox(width: 10),
+          const Text('Normal', style: TextStyle(color: C.verde, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'EAR ${m['ear'] != null ? fmt(m['ear'], 3) : '—'} · BPM ${m['bpm'] != null ? fmt(m['bpm'], 0) : '—'}',
+              style: const TextStyle(fontSize: 12, color: C.muted),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(clockFull(m['timestamp']), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 }

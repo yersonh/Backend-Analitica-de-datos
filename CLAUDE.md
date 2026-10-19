@@ -172,11 +172,16 @@ with live status, last reading age and today's events, sorted by urgency; it bac
 the supervisor's "Flota" tab (`fleet_screen.dart`, polled every 3 s by
 `fleet_controller.dart`, which also alerts on new events from any session). Polling cadence
 matches the web (1.5s status, 4s events) in `mobile/lib/live_controller.dart`.
+`/eventos` also returns `normales` (`database.normal_minutes`: up to 20 recent
+minutes with no alert/sensor warning, one row per minute with mean EAR/BPM);
+the app's Historial merges them with the episodes. The app mirrors the web's
+light pastel palette (`theme.dart`), hides the CRISP-DM summary and the model
+sections that are not `disponible`, and has no camera card.
 
 ## Firmware ↔ backend contract
 
 The camera sketch actually flashed is `camara` (repo root; QVGA, a frame every
-~333 ms for the app's live video); `firmware/esp32cam_frame_sender` is the older
+~333 ms for the live video on the web panel); `firmware/esp32cam_frame_sender` is the older
 reference (VGA, ~1.5s). Both POST `multipart/form-data` to `/frame` with fields
 `session_id` and `file` (JPEG). `firmware/esp32_pulse_sender` POSTs
 `application/x-www-form-urlencoded` `bpm` + `session_id` to `/pulso` every ~2s
@@ -197,8 +202,11 @@ reports `camara_activa`. `buzzer` is true while the fusion status is
 `alerta` or for the seconds a supervisor requested via `POST /api/buzzer`
 (permission `todas_sesiones`); `/estado` exposes `buzzer`, `buzzer_auto`,
 `buzzer_manual_seg` and `camara_activa`. A restart clears frames and pending
-buzzer requests. Supervisors get system notifications of fleet events through
-`mobile/lib/notifications.dart`; an Android foreground service ("vigilando la
-flota", type `dataSync`, `android:stopWithTask="true"` in the manifest) keeps the
-app from being frozen in the background — do not set the plugin's own
+buzzer requests. In the app, `home_screen.dart` raises a drowsiness alarm when
+the live status *changes to* `alerta` (red banner + repeated vibration + a system
+notification on the `sidfam_somnolencia` channel); supervisors also get system
+notifications of fleet events. Both go through `mobile/lib/notifications.dart`;
+for every role an Android foreground service (type `dataSync`,
+`android:stopWithTask="true"` in the manifest) keeps polling alive in the
+background (conductor: `_live` at a slower pace) — do not set the plugin's own
 `stopWithTask` option, it stops the service as soon as the app is hidden.

@@ -7,7 +7,6 @@ import '../app_state.dart';
 import '../live_controller.dart';
 import '../theme.dart';
 import '../util.dart';
-import '../widgets/camera_view.dart';
 import '../widgets/common.dart';
 import '../widgets/live_widgets.dart';
 
@@ -36,21 +35,6 @@ class LiveScreen extends StatelessWidget {
                 ),
               _Hero(s: s, st: st, keyName: key),
               if (app.can('todas_sesiones') || s['buzzer'] == true) _BuzzerCard(s: s, app: app),
-              GlassCard(
-                title: 'Cámara en vivo · lo que ve el modelo',
-                icon: Icons.videocam_outlined,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    LiveCameraView(sessionId: app.sessionId),
-                    const SizedBox(height: 10),
-                    const Note(
-                      'Verde: normal. Rojo: ojos cerrados o bostezo. Naranja: cabeza inclinada. '
-                      'La franja superior es el estado de la fusión (cámara + pulso).',
-                    ),
-                  ],
-                ),
-              ),
               _PulseCard(s: s, app: app),
               _FusionCard(s: s, st: st, keyName: key),
               _MetersCard(s: s, app: app),
