@@ -81,7 +81,7 @@ class LiveScreen extends StatelessWidget {
                   max: 110,
                   auto: true,
                   ref: asDouble(s['baseline_bpm']),
-                  refColor: const Color(0xFFB4C3DF),
+                  refColor: C.gris,
                   refLabel: s['baseline_bpm'] != null ? 'basal ${asDouble(s['baseline_bpm'])!.round()}' : '',
                 ),
               ),
@@ -290,7 +290,10 @@ class _PulseCardState extends State<_PulseCard> {
         : bpm != null
         ? ('Estable', C.verde, false)
         : ('Sin datos', C.gris, true);
-    final ecgColor = implausible ? C.violeta : (fisio ? C.rojo : C.cyan);
+    // tonos claros: el ECG va sobre un monitor oscuro (verde petróleo), como en el web
+    final ecgColor = implausible
+        ? const Color(0xFFCDB6FF)
+        : (fisio ? const Color(0xFFFFA3B8) : const Color(0xFF8FE3C0));
 
     return GlassCard(
       title: 'Pulso cardíaco',
@@ -336,7 +339,11 @@ class _PulseCardState extends State<_PulseCard> {
             ],
           ),
           const SizedBox(height: 8),
-          EcgView(bpm: s['data_is_fresh'] == true ? bpm : null, color: ecgColor, phase: _phase),
+          Container(
+            decoration: BoxDecoration(color: const Color(0xFF2F4A52), borderRadius: BorderRadius.circular(12)),
+            clipBehavior: Clip.antiAlias,
+            child: EcgView(bpm: s['data_is_fresh'] == true ? bpm : null, color: ecgColor, phase: _phase),
+          ),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -620,7 +627,7 @@ class _BuzzerCardState extends State<_BuzzerCard> {
             const SizedBox(width: 8),
             FilledButton.icon(
               onPressed: _busy ? null : _ring,
-              style: FilledButton.styleFrom(backgroundColor: C.rojo, foregroundColor: const Color(0xFF1A0508)),
+              style: FilledButton.styleFrom(backgroundColor: C.rojo, foregroundColor: Colors.white),
               icon: _busy
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.campaign_outlined, size: 18),

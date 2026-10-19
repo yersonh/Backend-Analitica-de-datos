@@ -140,8 +140,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               children: [
                 Note(
                   _session == 'todas'
-                      ? 'Metodología CRISP-DM sobre las lecturas de TODAS las sesiones.'
-                      : 'Metodología CRISP-DM sobre las lecturas guardadas de la sesión $_session.',
+                      ? 'Lecturas guardadas de TODAS las sesiones.'
+                      : 'Lecturas guardadas de la sesión $_session.',
                 ),
                 const SizedBox(height: 12),
                 if (picker) ...[
@@ -236,18 +236,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   List<Widget> _sectionsFor(Map<String, dynamic> r) {
     final params = _map(r['parametros']);
     final labels = _map(params['etiquetas_variables']).map((k, v) => MapEntry(k, '$v'));
+    // Igual que el panel web: sin resumen CRISP-DM, y cada modelo aparece solo
+    // cuando ya hay datos suficientes para calcularlo.
+    bool ok(String k) => _map(r[k])['disponible'] == true;
     return [
-      CrispSection(fases: _list(r['crisp_dm']).map(_map).toList()),
       _QualitySection(q: _map(r['calidad_datos'])),
       _DescriptiveSection(
         d: _map(r['descriptiva']),
         labels: labels,
         ventana: (params['ventana_s'] as num?)?.toInt() ?? _ventana,
       ),
-      _ClusterSection(c: _map(r['clustering']), labels: labels),
-      _ClassifySection(k: _map(r['clasificacion'])),
-      RegressionSection(g: _map(r['regresion'])),
-      _AnomaliesSection(a: _map(r['anomalias']), labels: labels),
+      if (ok('clustering')) _ClusterSection(c: _map(r['clustering']), labels: labels),
+      if (ok('clasificacion')) _ClassifySection(k: _map(r['clasificacion'])),
+      if (ok('anomalias')) _AnomaliesSection(a: _map(r['anomalias']), labels: labels),
+      if (ok('regresion')) RegressionSection(g: _map(r['regresion'])),
     ];
   }
 }

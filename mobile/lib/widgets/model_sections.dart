@@ -1,5 +1,5 @@
-// Secciones del reporte añadidas con CRISP-DM: resumen por fase y regresión
-// (logística / lineal). Consumen `crisp_dm` y `regresion` de /analitica/reporte.
+// Sección de regresión del reporte (logística / lineal). Consume `regresion`
+// de /analitica/reporte.
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -10,85 +10,6 @@ import 'common.dart';
 
 Map<String, dynamic> _map(dynamic v) => ((v as Map?) ?? const {}).cast<String, dynamic>();
 List<dynamic> _list(dynamic v) => (v as List?) ?? const [];
-
-// ---------------------------------------------------------------------------
-// CRISP-DM: una tarjeta por fase con lo que salió en estos datos
-// ---------------------------------------------------------------------------
-
-class CrispSection extends StatelessWidget {
-  const CrispSection({super.key, required this.fases});
-  final List<Map<String, dynamic>> fases;
-
-  @override
-  Widget build(BuildContext context) {
-    if (fases.isEmpty) return const SizedBox.shrink();
-    return GlassCard(
-      title: 'Metodología CRISP-DM · resumen por fase',
-      icon: Icons.account_tree_outlined,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Note(
-            'Lo que se hizo en cada fase y lo que salió con estos datos. '
-            'Toca una fase para ver el detalle.',
-          ),
-          const SizedBox(height: 8),
-          for (final f in fases) _Phase(f: f),
-        ],
-      ),
-    );
-  }
-}
-
-class _Phase extends StatelessWidget {
-  const _Phase({required this.f});
-  final Map<String, dynamic> f;
-
-  @override
-  Widget build(BuildContext context) {
-    final ok = f['estado'] == 'ok';
-    final color = ok ? C.verde : C.ambar;
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        color: C.cardHi,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          initiallyExpanded: !ok,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          leading: CircleAvatar(
-            radius: 15,
-            backgroundColor: color.withValues(alpha: 0.18),
-            foregroundColor: color,
-            child: Text('${f['numero']}', style: const TextStyle(fontWeight: FontWeight.w800)),
-          ),
-          title: Text('${f['fase']}', style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text('${f['pregunta']}', style: const TextStyle(color: C.muted, fontSize: 12)),
-          trailing: Icon(ok ? Icons.check_circle_outline : Icons.warning_amber_rounded, color: color),
-          expandedCrossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final h in _list(f['hallazgos']))
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('•  ', style: TextStyle(color: C.muted)),
-                    Expanded(child: Text('$h', style: const TextStyle(fontSize: 13, height: 1.35))),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Regresión: logística (objetivo binario) o lineal (KSS continuo)

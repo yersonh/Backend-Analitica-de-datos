@@ -539,7 +539,7 @@ class _EyePainter extends CustomPainter {
     if (!searching) {
       final r = s.height * 0.32;
       canvas.drawCircle(Offset(s.width / 2, cy), r, Paint()..color = color.withValues(alpha: 0.7));
-      canvas.drawCircle(Offset(s.width / 2, cy), r * 0.45, Paint()..color = C.bg);
+      canvas.drawCircle(Offset(s.width / 2, cy), r * 0.45, Paint()..color = C.text);
     }
     canvas.restore();
     canvas.drawPath(

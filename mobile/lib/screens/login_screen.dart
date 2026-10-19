@@ -144,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ? const SizedBox(
                                           width: 20,
                                           height: 20,
-                                          child: CircularProgressIndicator(strokeWidth: 2.4, color: Color(0xFF031322)),
+                                          child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
                                         )
                                       : const Row(
                                           mainAxisSize: MainAxisSize.min,

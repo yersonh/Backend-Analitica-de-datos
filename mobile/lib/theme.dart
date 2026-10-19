@@ -1,25 +1,25 @@
-// Paleta y tema oscuro, equivalentes a los del panel web.
+// Paleta y tema claro pastel (lavanda + menta), equivalentes a los del panel web.
 
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 class C {
-  static const bg = Color(0xFF030712);
-  static const card = Color(0xFF0B1324);
-  static const cardHi = Color(0xFF111C33);
-  static const border = Color(0x2694B2EB);
-  static const text = Color(0xFFE6EDF7);
-  static const muted = Color(0xFF9FB0D0);
+  static const bg = Color(0xFFD9D9F0);
+  static const card = Color(0xFFF1EFFC);
+  static const cardHi = Color(0xFFFFFFFF);
+  static const border = Color(0x2E6C6FD6);
+  static const text = Color(0xFF1B1E3F);
+  static const muted = Color(0xFF545A82);
 
-  static const verde = Color(0xFF4ADE80);
-  static const esmeralda = Color(0xFF34D399);
-  static const ambar = Color(0xFFFBBF24);
-  static const naranja = Color(0xFFFB923C);
-  static const rojo = Color(0xFFFB7185);
-  static const violeta = Color(0xFFC084FC);
-  static const cyan = Color(0xFF38BDF8);
-  static const azul = Color(0xFF60A5FA);
-  static const gris = Color(0xFF94A3B8);
+  static const verde = Color(0xFF3EA88C);
+  static const esmeralda = Color(0xFF2F9E80);
+  static const ambar = Color(0xFFD99A2B);
+  static const naranja = Color(0xFFE58A4A);
+  static const rojo = Color(0xFFE0607E);
+  static const violeta = Color(0xFF9B7AD8);
+  static const cyan = Color(0xFF6C6FD6);
+  static const azul = Color(0xFF7C8FE8);
+  static const gris = Color(0xFF9A9CC0);
 
   static Color role(String? role) => switch (role) {
     'administrador' => violeta,
@@ -31,12 +31,13 @@ class C {
 
 ThemeData buildTheme() {
   final base = ThemeData(
-    brightness: Brightness.dark,
+    brightness: Brightness.light,
     useMaterial3: true,
     // transparente: el fondo aurora (widgets/brand.dart) se pinta detrás de todas las pantallas
     scaffoldBackgroundColor: Colors.transparent,
-    colorScheme: const ColorScheme.dark(
+    colorScheme: const ColorScheme.light(
       primary: C.cyan,
+      onPrimary: Colors.white,
       secondary: C.violeta,
       surface: C.card,
       error: C.rojo,
@@ -70,7 +71,7 @@ ThemeData buildTheme() {
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: C.card.withValues(alpha: 0.82),
-      indicatorColor: const Color(0x3338BDF8),
+      indicatorColor: const Color(0x336C6FD6),
       indicatorShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       labelTextStyle: WidgetStateProperty.resolveWith(
         (s) => TextStyle(

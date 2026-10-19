@@ -23,7 +23,7 @@ class Notifier {
     importance: Importance.max,
     priority: Priority.high,
     category: AndroidNotificationCategory.alarm,
-    color: Color(0xFFFB7185),
+    color: Color(0xFFE0607E),
     ticker: 'SIDFAM',
   );
 

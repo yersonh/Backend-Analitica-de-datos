@@ -284,10 +284,12 @@ class _AuroraPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = C.bg);
     final m = size.longestSide;
+    // mismas manchas que el panel web: lavanda, menta, lila y durazno
     final blobs = <(Offset, double, Color)>[
-      (Offset(size.width * .1, size.height * .05), m * .62, const Color(0x3322D3EE)),
-      (Offset(size.width * 1.02, size.height * .42), m * .58, const Color(0x2E8B5CF6)),
-      (Offset(size.width * .3, size.height * 1.03), m * .55, const Color(0x24F472B6)),
+      (Offset(size.width * .06, size.height * .04), m * .62, const Color(0xBF8C82E1)),
+      (Offset(size.width * .96, size.height * .08), m * .55, const Color(0xA678C8B2)),
+      (Offset(size.width * .85, size.height * .95), m * .6, const Color(0xB3AA91E8)),
+      (Offset(size.width * .1, size.height * .92), m * .5, const Color(0x8CF0BEAA)),
     ];
     for (final (c, r, col) in blobs) {
       canvas.drawCircle(c, r, Paint()..shader = ui.Gradient.radial(c, r, [col, col.withValues(alpha: 0)]));
@@ -345,12 +347,12 @@ class _ShimmerTextState extends State<ShimmerText> with SingleTickerProviderStat
           final dx = r.width * 2 * _c.value;
           return LinearGradient(
             colors: const [
-              Colors.white,
-              Color(0xFF7DD3FC),
-              Color(0xFFA78BFA),
-              Color(0xFFF9A8D4),
-              Color(0xFF7DD3FC),
-              Colors.white,
+              C.text,
+              C.cyan,
+              C.violeta,
+              Color(0xFFC0609A),
+              C.cyan,
+              C.text,
             ],
             tileMode: TileMode.repeated,
           ).createShader(Rect.fromLTWH(-dx, 0, r.width * 2, r.height));
@@ -377,7 +379,7 @@ class GradientButton extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          gradient: const LinearGradient(colors: [C.cyan, Color(0xFF818CF8), C.violeta]),
+          gradient: const LinearGradient(colors: [C.cyan, Color(0xFF8A86E0), C.violeta]),
           boxShadow: [
             BoxShadow(
               color: C.cyan.withValues(alpha: .45),
@@ -395,9 +397,9 @@ class GradientButton extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
               child: DefaultTextStyle.merge(
-                style: const TextStyle(color: Color(0xFF031322), fontWeight: FontWeight.w700, fontSize: 16),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
                 child: IconTheme.merge(
-                  data: const IconThemeData(color: Color(0xFF031322)),
+                  data: const IconThemeData(color: Colors.white),
                   child: Center(child: child),
                 ),
               ),
