@@ -39,6 +39,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     const filters = {
       'all': 'Todos',
       'normal': 'Normal',
+      'vigilancia': 'Vigilancia',
       'alto': 'Alto',
       'medio': 'Medio',
       'advertencia_sensor': 'Sensor',
@@ -47,10 +48,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
       listenable: widget.live,
       builder: (context, _) {
         final events = widget.live.events;
-        // Alertas + minutos normales (el servidor manda pocos y ya resumidos)
-        // en una sola línea de tiempo, del más reciente al más antiguo.
+        // Alertas + minutos normales y en vigilancia (el servidor manda pocos y
+        // ya resumidos) en una sola línea de tiempo, del más reciente al más antiguo.
         final normales = [for (final n in widget.live.normales) {...n, 'risk_level': 'normal'}];
-        final all = [...events, ...normales]
+        final vigilancias = [for (final v in widget.live.vigilancias) {...v, 'risk_level': 'vigilancia'}];
+        final all = [...events, ...vigilancias, ...normales]
           ..sort((a, b) {
             final ta = parseTs(a['timestamp']), tb = parseTs(b['timestamp']);
             if (ta == null || tb == null) return 0;
@@ -84,14 +86,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           ? 'Todavía no hay lecturas de esta sesión.'
                           : _filter == 'normal'
                           ? 'No hay minutos normales en las últimas 24 h.'
+                          : _filter == 'vigilancia'
+                          ? 'No hay minutos en vigilancia en las últimas 24 h.'
                           : 'No hay episodios con este filtro. ¡Buen viaje!',
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
                       itemCount: list.length,
-                      itemBuilder: (context, i) => list[i]['risk_level'] == 'normal'
-                          ? NormalTile(minute: list[i])
-                          : EventTile(event: list[i], fresh: widget.live.freshIds.contains(list[i]['id'])),
+                      itemBuilder: (context, i) => switch (list[i]['risk_level']) {
+                        'normal' => MinuteTile(minute: list[i], color: C.verde, icon: Icons.check_circle_outline, label: 'Normal'),
+                        'vigilancia' => MinuteTile(minute: list[i], color: kWatch.color, icon: kWatch.icon, label: kWatch.label),
+                        _ => EventTile(event: list[i], fresh: widget.live.freshIds.contains(list[i]['id'])),
+                      },
                     ),
             ),
           ],
@@ -101,10 +107,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
-/// Un minuto sin alertas: fila compacta en verde con EAR y BPM medios.
-class NormalTile extends StatelessWidget {
-  const NormalTile({super.key, required this.minute});
+/// Un minuto sin episodio (normal o en vigilancia): fila compacta con EAR y BPM medios.
+class MinuteTile extends StatelessWidget {
+  const MinuteTile({super.key, required this.minute, required this.color, required this.icon, required this.label});
   final Map<String, dynamic> minute;
+  final Color color;
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -113,15 +122,15 @@ class NormalTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: C.verde.withValues(alpha: 0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: C.verde.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.check_circle_outline, color: C.verde, size: 20),
+          Icon(icon, color: color, size: 20),
           const SizedBox(width: 10),
-          const Text('Normal', style: TextStyle(color: C.verde, fontWeight: FontWeight.w700)),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(

@@ -12,7 +12,7 @@ solo consulta y administra, igual que el navegador.
 | **Panel**: estado, canales, pulso con ECG, motor de fusión, medidores vs. umbral, tendencias EAR/BPM, KPI y dona | parte superior de `/` | `panel` |
 | **Historial** de episodios con filtros (alto / medio / sensor) | "Historial de episodios" | `panel` |
 | **Analítica** (admin/supervisor): panel de **todos los usuarios** (indicadores y nivel de riesgo por persona) y, al tocar uno, su análisis CRISP-DM | `GET /analitica/usuarios` | `analitica` + `todas_sesiones` |
-| **Analítica CRISP-DM**: resumen por fase, calidad, descriptiva, K-Means, árbol de decisión, regresión logística/lineal, anomalías; exportar CSV (compartir) | sección `#analitica` | `analitica` (CSV: `exportar`) |
+| **Analítica CRISP-DM**: calidad, descriptiva, K-Means, árbol de decisión, regresión logística/lineal, anomalías; exportar CSV (compartir) | sección `#analitica` | `analitica` (CSV: `exportar`) |
 | **Mi analítica** (conductor): lo mismo, solo con sus datos | sección `#analitica` | `analitica_propia` |
 | **Usuarios** (pestaña del administrador): crear, editar, desactivar, restablecer contraseña | `/usuarios` | `usuarios` |
 | **KSS** autoreporte 1-9 | formulario KSS | `autoreporte` |

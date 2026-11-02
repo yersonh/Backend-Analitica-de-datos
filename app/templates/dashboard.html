@@ -472,6 +472,29 @@
         .dlegend em { font-style: normal; color: var(--muted); font-family: var(--mono); font-size: 0.76rem; width: 44px; text-align: right; }
 
         /* ================= Historial ================= */
+        /* Flota y buzzer (quien ve todas las sesiones) */
+        .fleet { display: grid; gap: 8px; margin-top: 14px; }
+        .fleet-row { display: grid; grid-template-columns: minmax(150px, 1.6fr) minmax(120px, 1fr) repeat(3, minmax(60px, 0.6fr)) auto; gap: 12px; align-items: center;
+            padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); border-left: 4px solid var(--c); background: rgba(255, 255, 255, 0.55); cursor: pointer; transition: background 0.2s; }
+        .fleet-row:hover, .fleet-row:focus-visible { background: rgba(255, 255, 255, 0.9); }
+        .fleet-row.current { background: color-mix(in srgb, var(--c) 10%, rgba(255, 255, 255, 0.8)); }
+        .fleet-row .who b { display: block; font-size: 0.92rem; }
+        .fleet-row .who span, .fleet-row .stat span { font-size: 0.72rem; color: var(--muted); }
+        .fleet-row .st { color: var(--c); font-weight: 700; font-size: 0.84rem; }
+        .fleet-row .stat b { display: block; font-family: var(--mono); font-size: 0.9rem; font-weight: 600; }
+        .wake-btn { padding: 7px 13px; border: 0; border-radius: 999px; background: var(--rojo); color: #fff; font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
+        .wake-btn:hover { opacity: 0.85; }
+        .wake-btn:disabled { opacity: 0.5; cursor: default; }
+        .buzzer-card { display: flex; align-items: center; gap: 14px; --c: var(--muted); }
+        .buzzer-card.on { --c: var(--rojo); }
+        .buzzer-card svg { width: 26px; height: 26px; flex: none; color: var(--c); }
+        .buzzer-card .txt { flex: 1; min-width: 0; }
+        .buzzer-card .txt b { display: block; font-size: 0.92rem; }
+        .buzzer-card .txt span { font-size: 0.8rem; color: var(--c); }
+        @media (max-width: 760px) {
+            .fleet-row { grid-template-columns: 1fr 1fr 1fr; }
+            .fleet-row .who, .fleet-row .st, .fleet-row .wake-btn { grid-column: span 3; }
+        }
         .filters { display: flex; gap: 8px; flex-wrap: wrap; }
         .filter { padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: transparent; cursor: pointer; font-size: 0.78rem; color: var(--ink-2); transition: all 0.2s; }
         .filter:hover { border-color: var(--line-2); color: var(--ink); }
@@ -740,6 +763,19 @@
         </header>
 
         <div class="grid">
+            {% if "todas_sesiones" in perms %}
+            <!-- ===== Flota ===== -->
+            <section class="glass pad span-12 reveal" id="flota">
+                <div class="card-title" style="flex-wrap:wrap">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M16 4a4 4 0 0 1 0 8M18 15c2.5.8 4 2.8 4 6"/></svg>
+                    Flota de conductores
+                    <span class="spacer"></span>
+                    <span class="chip" id="fleet-summary">Cargando…</span>
+                </div>
+                <div class="fleet" id="fleet-list"></div>
+            </section>
+            {% endif %}
+
             <!-- ===== Hero ===== -->
             <section class="glass hero span-8 reveal" id="hero" aria-live="polite">
                 <div class="hero-glow"></div>
@@ -827,6 +863,13 @@
             </section>
 
             <!-- ===== Fusión ===== -->
+            <!-- ===== Buzzer ===== -->
+            <section class="glass pad span-12 buzzer-card" id="buzzer-card" style="display:none">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 0 0 3.4 0"/></svg>
+                <div class="txt"><b>Buzzer del dispositivo</b><span id="buzzer-text"></span></div>
+                {% if "todas_sesiones" in perms %}<button type="button" class="wake-btn" id="buzzer-btn">Despertar</button>{% endif %}
+            </section>
+
             <section class="glass pad fusion span-7 reveal">
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="12" r="2"/><path d="M7 6c6 0 6 6 10 6M7 18c6 0 6-6 10-6"/></svg>
@@ -935,6 +978,8 @@
                     <span class="spacer"></span>
                     <div class="filters" id="filters">
                         <button class="filter active" data-f="all">Todos</button>
+                        <button class="filter" data-f="normal">Normal</button>
+                        <button class="filter" data-f="vigilancia">Vigilancia</button>
                         <button class="filter" data-f="alto">Alto</button>
                         <button class="filter" data-f="medio">Medio</button>
                         <button class="filter" data-f="advertencia_sensor">Sensor</button>
@@ -964,6 +1009,14 @@
                     <a class="btn" id="csv-win" href="#">Dataset CSV</a>{% endif %}
                 </div>
             </div>
+
+            {% if "analitica" in perms and "todas_sesiones" in perms %}
+            <section class="an-panel glass" id="comparar">
+                <h2>Comparar conductores</h2>
+                <p class="lead">Indicadores por persona, de mayor a menor riesgo. Haz clic en una fila para abrir su sesión.</p>
+                <div id="cmp-content"><div class="loading">Calculando…</div></div>
+            </section>
+            {% endif %}
 
             <div id="an-content"><div class="loading">Calculando analítica…</div></div>
         </div>
@@ -1003,6 +1056,7 @@
     (() => {
         const SESSION = {{ session_id | tojson }};
         const THR = {{ thresholds | tojson }};
+        const CAN_FLEET = {{ ("todas_sesiones" in perms) | tojson }};
         const INITIAL_EVENTS = {{ events | tojson }};
         const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
         const $ = (id) => document.getElementById(id);
@@ -1196,8 +1250,8 @@
             { id: "ear",  name: "Apertura ocular", hint: "EAR", max: 0.4, thr: THR.ear, bad: (v) => v < THR.ear, fmt: (v) => fmt(v, 3), thrLabel: "cierre " + THR.ear },
             { id: "mar",  name: "Apertura bucal",  hint: "MAR · bostezo", max: 1, thr: THR.mar, bad: (v) => v > THR.mar, fmt: (v) => fmt(v, 3), thrLabel: "bostezo " + THR.mar },
             { id: "tilt", name: "Inclinación de cabeza", hint: "grados", max: 45, thr: THR.head_tilt_deg, bad: (v) => v > THR.head_tilt_deg, fmt: (v) => fmt(v, 1) + "°", thrLabel: THR.head_tilt_deg + "°" },
-            { id: "drop", name: "Caída vs. basal", hint: "media 60s", max: 0.2, thr: THR.relative_drop, bad: (v) => v >= THR.relative_drop, fmt: (v) => (v * 100).toFixed(1) + " %", thrLabel: (THR.relative_drop * 100) + " %" },
-            { id: "std",  name: "Variabilidad", hint: "σ BPM", max: 8, thr: THR.low_variability_std, bad: (v) => v < THR.low_variability_std, fmt: (v) => fmt(v, 2), thrLabel: "σ " + THR.low_variability_std },
+            { id: "drop", name: "Caída vs. basal", hint: "mediana 60s", max: 0.2, thr: THR.relative_drop, bad: (v) => v >= THR.relative_drop, fmt: (v) => (v * 100).toFixed(1) + " %", thrLabel: (THR.relative_drop * 100) + " %" },
+            { id: "std",  name: "Variabilidad", hint: "σ BPM · refuerza la caída", max: 8, thr: THR.low_variability_std, bad: () => false, fmt: (v) => fmt(v, 2), thrLabel: "σ " + THR.low_variability_std },
         ];
         $("meters").innerHTML = METERS.map(m => `
             <div class="meter" id="mt-${m.id}">
@@ -1309,6 +1363,8 @@
 
         // ---------- Estado en vivo ----------
         let lastKey = null;
+        let lastWatchToast = 0;
+        const WATCH_COOLDOWN_MS = 60000;   // la vigilancia va y viene: mínimo entre dos avisos
         function applyStatus(s) {
             let key = "sindatos";
             if (s.has_any_data) {
@@ -1321,6 +1377,13 @@
             document.body.style.setProperty("--accent", p.accent);
             document.body.classList.toggle("lvl-alto", key === "alerta-alto");
             document.body.classList.toggle("lvl-medio", key === "alerta-medio");
+            // La vigilancia no guarda evento: se avisa al entrar desde un estado tranquilo.
+            // Quien ve la flota recibe este aviso desde ahí, de cualquier conductor.
+            if (!CAN_FLEET && key === "vigilancia" && lastKey !== key && !(lastKey || "").startsWith("alerta")
+                && s.data_is_fresh && Date.now() - lastWatchToast > WATCH_COOLDOWN_MS) {
+                lastWatchToast = Date.now();
+                watchToast(s.detail);
+            }
             if (key !== lastKey) {
                 const h = $("hero-headline");
                 h.textContent = p.title; h.classList.remove("swap"); void h.offsetWidth; h.classList.add("swap");
@@ -1350,6 +1413,7 @@
             $("eye-g").style.transform = `scaleY(${open})`;
             $("scan-tag").textContent = s.face_detected === false ? "BUSCANDO ROSTRO…" : (s.ear != null ? `APERTURA ${Math.round(clamp(s.ear / 0.32, 0, 1) * 100)}%` : "APERTURA —");
             setCamera(!!s.camara_activa);
+            applyBuzzer(s);
 
             // pulso
             const bpm = s.bpm;
@@ -1357,7 +1421,9 @@
             heart.classList.toggle("beat", bpm != null && !REDUCED);
             if (bpm) heart.style.setProperty("--beat", (60 / clamp(bpm, 30, 220)) + "s");
             tweenBpm(bpm != null ? Math.round(bpm) : null);
-            const drop = (s.baseline_bpm && s.bpm_mean) ? (s.baseline_bpm - s.bpm_mean) / s.baseline_bpm : null;
+            // misma medida que usa la detección: la mediana de la ventana
+            const refBpm = s.bpm_median ?? s.bpm_mean;
+            const drop = (s.baseline_bpm && refBpm) ? (s.baseline_bpm - refBpm) / s.baseline_bpm : null;
             const delta = $("bpm-delta");
             delta.textContent = drop != null ? `Δ basal ${drop > 0 ? "−" : "+"}${Math.abs(drop * 100).toFixed(1)} %` : "Δ basal —";
             delta.classList.toggle("down", drop != null && drop >= THR.relative_drop);
@@ -1411,16 +1477,33 @@
             if (s < 86400) return "hace " + Math.round(s / 3600) + " h";
             return "hace " + Math.round(s / 86400) + " d";
         }
+        // Minutos sin episodio (el servidor los manda resumidos): van en la misma línea de tiempo
+        const MINUTE = { normal: { c: "var(--verde)", label: "Normal" }, vigilancia: { c: "var(--ambar)", label: "Vigilancia" } };
+        const OK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>';
+        let minutes = [];
         function renderTimeline(freshIds = new Set()) {
-            const list = events.filter(e => filter === "all" || e.risk_level === filter);
+            const all = [...events, ...minutes].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            const list = all.filter(e => filter === "all" || e.risk_level === filter);
             if (!list.length) {
-                $("timeline").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><p>${events.length ? "No hay episodios con este filtro." : "Aún no se han registrado episodios de fatiga. ¡Buen viaje!"}</p></div>`;
+                $("timeline").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><p>${all.length ? "No hay nada con este filtro en las últimas 24 h." : "Aún no se han registrado lecturas de esta sesión."}</p></div>`;
                 return;
             }
             $("timeline").innerHTML = list.map((e, i) => {
-                const r = RISK[e.risk_level] || { c: "var(--gris)", label: e.risk_level };
+                const m = e.minuto ? MINUTE[e.risk_level] : null;
+                const r = m || RISK[e.risk_level] || { c: "var(--gris)", label: e.risk_level };
                 const d = new Date(e.timestamp);
                 const clock = isNaN(d) ? esc(e.timestamp) : d.toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+                if (m) return `<div class="ev" style="--c:${r.c};--i:${Math.min(i, 12)}">
+                    <div class="ico">${e.risk_level === "normal" ? OK_ICON : ICONS.medio}</div>
+                    <div>
+                        <div class="title"><span class="badge">${esc(r.label)}</span></div>
+                        <div class="tags">
+                            <span class="tag">BPM ${e.bpm != null ? Math.round(e.bpm) : "—"}</span>
+                            <span class="tag">EAR ${e.ear != null ? Number(e.ear).toFixed(3) : "—"}</span>
+                        </div>
+                    </div>
+                    <div class="when">${relTime(e.timestamp)}<b>${clock}</b></div>
+                </div>`;
                 const esc8 = String(e.detail || "").startsWith("Escalada");
                 return `<div class="ev ${freshIds.has(e.id) ? "fresh" : ""}" style="--c:${r.c};--i:${Math.min(i, 12)}">
                     <div class="ico">${ICONS[e.risk_level] || ICONS.medio}</div>
@@ -1496,14 +1579,19 @@
             } catch {}
         }
         function toast(e) {
-            const r = RISK[e.risk_level] || { c: "var(--gris)", label: e.risk_level };
+            const r = RISK[e.risk_level] || { c: e.c || "var(--gris)", label: e.risk_level };
+            const what = e.title || (e.risk_level === "advertencia_sensor" ? "Advertencia de sensor" : "Nuevo episodio · " + r.label);
             const el = document.createElement("div");
             el.className = "toast"; el.style.setProperty("--c", r.c);
-            el.innerHTML = `<div class="ico">${ICONS[e.risk_level] || ICONS.medio}</div><div><b>${esc(e.risk_level === "advertencia_sensor" ? "Advertencia de sensor" : "Nuevo episodio · " + r.label)}</b><span>${esc(e.detail)}</span></div>`;
+            el.innerHTML = `<div class="ico">${ICONS[e.risk_level] || ICONS.medio}</div><div><b>${esc(e._quien ? `${e._quien} · ${what}` : what)}</b><span>${esc(e.detail)}</span></div>`;
             $("toasts").appendChild(el);
             setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 400); }, 6000);
-            beep(e.risk_level);
+            if (!e.silent) beep(e.risk_level);
         }
+        const watchToast = (detail, quien) => toast({
+            risk_level: "vigilancia", title: "En vigilancia", c: "var(--ambar)", _quien: quien,
+            detail: detail || "Un solo canal muestra indicios de fatiga",
+        });
 
         function applyEvents(data) {
             const next = data.events || [];
@@ -1513,8 +1601,14 @@
             if (next.length) maxId = Math.max(maxId ?? 0, ...next.map(e => e.id));
             else if (maxId === null) maxId = 0;
             [...next].reverse().filter(e => fresh.has(e.id)).slice(-3).forEach(toast);
-            const changed = fresh.size || next.length !== events.length;
+            const nextMinutes = [
+                ...(data.vigilancias || []).map(m => ({ ...m, risk_level: "vigilancia", minuto: true })),
+                ...(data.normales || []).map(m => ({ ...m, risk_level: "normal", minuto: true })),
+            ];
+            const stamp = (l) => l.map(m => m.risk_level + m.timestamp).join();
+            const changed = fresh.size || next.length !== events.length || stamp(nextMinutes) !== stamp(minutes);
             events = next;
+            minutes = nextMinutes;
             if (changed) renderTimeline(fresh);
             countTo($("k-alto"), counts.alto || 0);
             countTo($("k-medio"), counts.medio || 0);
@@ -1554,6 +1648,95 @@
             try { applyEvents(await getJSON(`/eventos?${q}`)); }
             catch (err) { console.error("No se pudo actualizar el historial", err); }
         }
+        // ---------- Buzzer ----------
+        function applyBuzzer(s) {
+            const card = $("buzzer-card");
+            const on = !!s.buzzer;
+            // el conductor solo lo ve mientras suena; "todas" no es un dispositivo
+            card.style.display = SESSION !== "todas" && (CAN_FLEET || on) ? "" : "none";
+            card.classList.toggle("on", on);
+            $("buzzer-text").textContent = !on ? "Apagado. Suena solo si se confirma fatiga."
+                : s.buzzer_auto ? "Sonando: fatiga confirmada por el sistema."
+                : `Sonando por orden del supervisor (${Math.ceil(s.buzzer_manual_seg || 0)} s).`;
+        }
+        async function ringBuzzer(sessionId, btn) {
+            btn.disabled = true;
+            try {
+                const r = await fetch("/api/buzzer", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sessionId, segundos: 5 }),
+                });
+                if (r.status === 401) return toLogin();
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                const d = await r.json();
+                toast({ risk_level: "buzzer", title: `Buzzer activado ${d.segundos} s`, detail: `Sesión ${sessionId} · el dispositivo lo recibe en ~2 s`, c: "var(--verde)", silent: true });
+            } catch (err) {
+                toast({ risk_level: "buzzer", title: "No se pudo activar el buzzer", detail: err.message, c: "var(--rojo)", silent: true });
+            } finally { btn.disabled = false; }
+        }
+        if ($("buzzer-btn")) $("buzzer-btn").addEventListener("click", (ev) => ringBuzzer(SESSION, ev.currentTarget));
+
+        // ---------- Flota (quien ve todas las sesiones) ----------
+        if (CAN_FLEET) {
+            let lastIds = null, lastEstados = null;
+            const lastWatch = {};
+            const ago = (s) => s == null ? "—" : s < 60 ? `${s} s` : s < 3600 ? `${Math.round(s / 60)} min` : s < 86400 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} d`;
+            function detectFleet(drivers) {
+                const ids = {}, estados = {}, now = Date.now();
+                drivers.forEach(d => {
+                    const sid = d.session_id, quien = d.conductor || sid, ev = d.ultimo_evento;
+                    estados[sid] = d.estado;
+                    if (ev) {
+                        ids[sid] = ev.id;
+                        // los episodios de la sesión abierta ya los avisa applyEvents
+                        if (lastIds && sid !== SESSION && !(lastIds[sid] >= ev.id)) toast({ ...ev, _quien: quien });
+                    }
+                    if (!lastEstados || d.estado !== "vigilancia") return;
+                    const antes = lastEstados[sid] || "";
+                    if (antes === "vigilancia" || antes.startsWith("alerta") || now - (lastWatch[sid] || 0) < WATCH_COOLDOWN_MS) return;
+                    lastWatch[sid] = now;
+                    watchToast(d.detail, quien);
+                });
+                lastIds = ids; lastEstados = estados;
+            }
+            function renderFleet(data) {
+                const drivers = data.conductores || [], res = data.resumen || {};
+                const alertas = (res["alerta-alto"] || 0) + (res["alerta-medio"] || 0);
+                $("fleet-summary").textContent = `${drivers.length} conductores · ${alertas} con fatiga · ${res.vigilancia || 0} en vigilancia`;
+                $("fleet-list").innerHTML = drivers.length ? drivers.map(d => {
+                    const st = STATES[d.estado] || STATES.sindatos;
+                    const hoy = d.eventos_hoy || {};
+                    return `<div class="fleet-row ${d.session_id === SESSION ? "current" : ""}" style="--c:${st.accent}" data-session="${esc(d.session_id)}" role="link" tabindex="0" title="Abrir el panel de esta sesión">
+                        <div class="who"><b>${esc(d.conductor || d.session_id)}</b><span>${esc(d.session_id)}${d.en_vivo ? " · en vivo" : ""}</span></div>
+                        <div class="st">${esc(st.title)}</div>
+                        <div class="stat"><b>${d.bpm != null ? Math.round(d.bpm) : "—"}</b><span>BPM</span></div>
+                        <div class="stat"><b>${(hoy.alto || 0) + (hoy.medio || 0)}</b><span>episodios hoy</span></div>
+                        <div class="stat"><b>${ago(d.ultima_lectura_seg)}</b><span>última lectura</span></div>
+                        <button type="button" class="wake-btn" data-ring="${esc(d.session_id)}">Despertar</button>
+                    </div>`;
+                }).join("") : `<div class="empty"><p>Aún no hay conductores. Crea usuarios con rol Conductor y asígnales una sesión.</p></div>`;
+            }
+            async function pollFleet() {
+                try {
+                    const data = await getJSON("/api/flota");
+                    detectFleet(data.conductores || []);
+                    renderFleet(data);
+                } catch (err) { console.error("No se pudo actualizar la flota", err); }
+            }
+            const openDriver = (row) => { location.search = "?session_id=" + encodeURIComponent(row.dataset.session); };
+            $("fleet-list").addEventListener("click", (ev) => {
+                const btn = ev.target.closest("[data-ring]");
+                if (btn) return ringBuzzer(btn.dataset.ring, btn);
+                const row = ev.target.closest(".fleet-row");
+                if (row) openDriver(row);
+            });
+            $("fleet-list").addEventListener("keydown", (ev) => {
+                if (ev.key === "Enter" && ev.target.classList.contains("fleet-row")) openDriver(ev.target);
+            });
+            pollFleet();
+            setInterval(pollFleet, 3000);
+        }
+
         renderTimeline();
         if (INITIAL_EVENTS.length) maxId = Math.max(...INITIAL_EVENTS.map(e => e.id));
         pollStatus(); pollEvents();
@@ -1889,6 +2072,18 @@
             </section>`;
         }
 
+        // Los modelos sin datos no se dibujan: esta tarjeta dice qué les falta
+        function renderPending(r) {
+            const faltan = [["K-Means", r.clustering], ["Árbol de decisión", r.clasificacion], ["Anomalías", r.anomalias], ["Regresión", r.regresion]]
+                .filter(([, m]) => m && !m.disponible && m.mensaje);
+            if (!faltan.length) return "";
+            return `<section class="an-panel glass" id="pendientes">
+                <h2>Modelos pendientes</h2>
+                <p class="lead">Aparecen solos en cuanto haya datos suficientes. Sigue recolectando lecturas con la cámara y el pulso a la vez.</p>
+                ${faltan.map(([nombre, m]) => `<p class="note" style="margin:6px 0"><b>${esc(nombre)}:</b> ${esc(m.mensaje)}</p>`).join("")}
+            </section>`;
+        }
+
         async function loadSessions() {
             const sel = document.getElementById("session-select");
             const ws = document.getElementById("window-select");
@@ -1924,7 +2119,7 @@
                 }
                 box.innerHTML = renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
                     renderCluster(r.clustering, r.parametros) + renderClassify(r.clasificacion) +
-                    renderAnomalies(r.anomalias, r.parametros) + renderRegression(r.regresion || { disponible: false, mensaje: "" });
+                    renderAnomalies(r.anomalias, r.parametros) + renderRegression(r.regresion || { disponible: false, mensaje: "" }) + renderPending(r);
                 chartsDescriptive(r.descriptiva);
                 chartsCluster(r.clustering);
                 chartsClassify(r.clasificacion);
@@ -1935,10 +2130,55 @@
             }
         }
 
-        document.getElementById("an-refresh").addEventListener("click", loadReport);
+        // Comparación entre personas (solo quien ve todas las sesiones)
+        async function loadUsers() {
+            const box = document.getElementById("cmp-content");
+            if (!box) return;
+            const NIVEL = { alto: ["Riesgo alto", "var(--rojo)"], medio: ["Riesgo medio", "var(--ambar)"], bajo: ["Riesgo bajo", "var(--verde)"], sin_datos: ["Sin datos", "var(--gris)"] };
+            try {
+                const r = await fetch("/analitica/usuarios");
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                const d = await r.json(), t = d.totales || {};
+                const kpi = (label, value, hint = "") => `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div>${hint ? `<div class="hint">${hint}</div>` : ""}</div>`;
+                const rows = (d.usuarios || []).map(u => {
+                    const [nivel, color] = NIVEL[u.nivel_riesgo] || NIVEL.sin_datos;
+                    const sinDatos = !u.lecturas;
+                    const pct = (v) => v == null ? "—" : n(v, 1) + " %";
+                    return `<tr ${sinDatos ? "" : `data-session="${esc(u.session_id)}" style="cursor:pointer"`}>
+                        <td><b>${esc(u.nombre || u.session_id)}</b><br><span class="note">${esc(u.usuario ? "@" + u.usuario : "sin usuario")} · ${esc(u.session_id)}</span></td>
+                        <td style="color:${color};font-weight:700">${nivel}</td>
+                        <td>${sinDatos ? "—" : `${u.episodios_alto} alto · ${u.episodios_medio} medio`}</td>
+                        <td>${n(u.episodios_por_hora, 2)}</td>
+                        <td>${pct(u.pct_alerta)}</td>
+                        <td>${pct(u.pct_vigilancia)}</td>
+                        <td>${n(u.bpm_medio, 0)}</td>
+                        <td>${pct(u.perclos)}</td>
+                        <td>${u.kss_reportes ? `${n(u.kss_medio, 1)} (${u.kss_reportes})` : "—"}</td>
+                        <td>${sinDatos ? "—" : n(u.horas_monitoreo, 2) + " h"}</td>
+                    </tr>`;
+                }).join("");
+                box.innerHTML = `<div class="kpis">
+                        ${kpi("Usuarios", n(t.usuarios, 0), n(t.conductores, 0) + " conductores")}
+                        ${kpi("Sesiones con datos", n(t.sesiones, 0))}
+                        ${kpi("Lecturas", n(t.lecturas, 0))}
+                        ${kpi("Horas monitoreadas", n(t.horas_monitoreo, 1))}
+                        ${kpi("Episodios de fatiga", n(t.episodios_fatiga, 0))}
+                    </div>
+                    ${rows ? `<div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Persona</th><th>Nivel</th><th>Episodios</th><th>Por hora</th><th>% alerta</th><th>% vigilancia</th><th>BPM medio</th><th>PERCLOS</th><th>KSS</th><th>Monitoreo</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Aún no hay conductores con datos.</div>`}`;
+                box.querySelectorAll("tr[data-session]").forEach(tr => tr.addEventListener("click", () => {
+                    location.search = "?session_id=" + encodeURIComponent(tr.dataset.session);
+                }));
+            } catch (e) {
+                console.error(e);
+                box.innerHTML = `<div class="empty">No se pudo calcular la comparación.<br><span class="note">${esc(e.message)}</span></div>`;
+            }
+        }
+
+        document.getElementById("an-refresh").addEventListener("click", () => { loadReport(); loadUsers(); });
 
         loadSessions();
         loadReport();
+        loadUsers();
         })();
         {% endif %}
     })();

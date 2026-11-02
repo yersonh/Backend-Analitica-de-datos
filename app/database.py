@@ -491,10 +491,13 @@ def list_sessions() -> list[dict]:
     return rows
 
 
-def normal_minutes(session_id: str, limit: int = 20, hours: int = 24) -> list[dict]:
-    """Minutos recientes SIN alerta ni advertencia de sensor, uno por fila, con el
-    EAR y el BPM medios. Resume las lecturas normales para el historial sin
-    mandar cada frame (serían miles por hora)."""
+def minute_summary(session_id: str, limit: int = 20, hours: int = 24) -> dict:
+    """Minutos recientes sin episodio guardado, uno por fila, con el EAR y el BPM
+    medios. Resume las lecturas para el historial sin mandar cada frame (serían
+    miles por hora). Un minuto con alguna lectura en vigilancia NO es normal:
+    va aparte, para que un cabeceo sin confirmar por el pulso no salga en verde.
+    Devuelve {"normales": [...], "vigilancias": [...]}, cada lista con máximo
+    `limit` filas. Los minutos con alerta o advertencia de sensor se omiten."""
     minute = ("to_char(timestamp, 'YYYY-MM-DD\"T\"HH24:MI')" if USE_POSTGRES
               else "substr(timestamp, 1, 16)")
     since = datetime.now() - timedelta(hours=hours)
@@ -503,23 +506,30 @@ def normal_minutes(session_id: str, limit: int = 20, hours: int = 24) -> list[di
         SELECT {minute} AS minuto, COUNT(*) AS lecturas,
                AVG(CASE WHEN source = 'frame' AND face_detected = 1 THEN ear END) AS ear,
                AVG(CASE WHEN source = 'pulso' THEN bpm END) AS bpm,
-               SUM(CASE WHEN fusion_status IN ('alerta', 'advertencia_sensor') THEN 1 ELSE 0 END) AS malas
+               SUM(CASE WHEN fusion_status = 'vigilancia' THEN 1 ELSE 0 END) AS en_vigilancia
         FROM sensor_readings
         WHERE session_id = ? AND timestamp >= ?
         GROUP BY {minute}
         HAVING SUM(CASE WHEN fusion_status IN ('alerta', 'advertencia_sensor') THEN 1 ELSE 0 END) = 0
-        ORDER BY minuto DESC LIMIT ?
+        ORDER BY minuto DESC
     """
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(_ph(sql), (session_id, since, limit))
+        cur.execute(_ph(sql), (session_id, since))
         rows = [dict(r) for r in cur.fetchall()]
-    return [{
-        "timestamp": r["minuto"],
-        "lecturas": int(r["lecturas"]),
-        "ear": round(float(r["ear"]), 3) if r["ear"] is not None else None,
-        "bpm": round(float(r["bpm"]), 1) if r["bpm"] is not None else None,
-    } for r in rows]
+
+    def fila(r: dict) -> dict:
+        return {
+            "timestamp": r["minuto"],
+            "lecturas": int(r["lecturas"]),
+            "ear": round(float(r["ear"]), 3) if r["ear"] is not None else None,
+            "bpm": round(float(r["bpm"]), 1) if r["bpm"] is not None else None,
+        }
+
+    return {
+        "normales": [fila(r) for r in rows if not r["en_vigilancia"]][:limit],
+        "vigilancias": [fila(r) for r in rows if r["en_vigilancia"]][:limit],
+    }
 
 
 # ---------------------------------------------------------------------------

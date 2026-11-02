@@ -47,7 +47,7 @@ las demás cuentas.
 | Rol | Qué puede hacer |
 |---|---|
 | **Administrador** | Todo lo del supervisor + gestionar usuarios (crear, cambiar rol/sesión, desactivar, restablecer contraseña) |
-| **Supervisor** | Ver todas las sesiones en vivo, el historial y la analítica; exportar CSV; registrar KSS |
+| **Supervisor** | Ver la flota y todas las sesiones en vivo (con cámara), el historial y la analítica, y comparar conductores; hacer sonar el buzzer de un conductor; exportar CSV; registrar KSS. Lo mismo en la web y en la app |
 | **Conductor** | Ver **solo su sesión asignada** (el `SESSION_ID` de sus ESP32) en vivo, su historial y la analítica CRISP-DM de **sus** datos; registrar su KSS |
 
 Los permisos y roles están definidos en `app/auth.py` (`PERMISOS`, `ROLES`).
@@ -80,12 +80,10 @@ firmado de la cookie): `POST /api/login`, `POST /api/cuenta/clave` y
 ### Analítica de datos (CRISP-DM)
 
 `app/analytics.py` sigue las 6 fases de CRISP-DM y el reporte
-(`GET /analitica/reporte`) incluye un resumen por fase (`crisp_dm`) con lo que
-salió en cada conjunto de datos: negocio y criterios de éxito (recall ≥ 80 %,
-precisión ≥ 70 %, ajustables en `CRITERIO_RECALL` / `CRITERIO_PRECISION`),
-calidad de datos, preparación en ventanas, modelado (K-Means, árbol de
-decisión, **regresión**, Isolation Forest), evaluación y despliegue con
-recomendaciones.
+(`GET /analitica/reporte`) devuelve la calidad de datos, la preparación en
+ventanas, el modelado (K-Means, árbol de decisión, **regresión**, Isolation
+Forest) y su evaluación. Cada modelo se muestra cuando hay datos suficientes
+para calcularlo; mientras tanto, la tarjeta *Modelos pendientes* dice qué falta.
 
 **Regresión logística o lineal** (`regression()`): se elige según la variable
 objetivo disponible.
@@ -154,13 +152,25 @@ sidfam-backend/
   bostezos. Umbral: `MAR_THRESHOLD = 0.6`.
 - **Inclinación de cabeza:** ángulo entre los ojos externos,
   aproximación simple de cabeceo.
-- **Pulso:** se mantiene una ventana deslizante de 60s por sesión;
-  se marca como señal de fatiga si el BPM sale de rango
-  (`< 50` o `> 110`) o si la variabilidad es muy baja de forma
-  sostenida (posible indicador de relajación/somnolencia).
-- **Fusión:** si hay señal visual **y** fisiológica al mismo tiempo →
-  riesgo **alto**; si hay solo señal visual → riesgo **medio**; si
-  hay solo señal fisiológica → riesgo **bajo**.
+- **Pulso:** se mantiene una ventana deslizante de 60s por sesión y
+  se evalúa con al menos 15 lecturas (~30s). La somnolencia se juzga
+  **frente al basal de la propia persona**, no con un BPM absoluto: la
+  mediana de las primeras 20 lecturas plausibles fija el basal, y hay
+  señal cuando la **mediana** de la ventana cae un 8 % o más por debajo
+  (`RELATIVE_DROP_THRESHOLD`). La mediana resiste los picos de ruido.
+  La **baja variabilidad** no dispara nada por sí sola, porque el ESP32
+  envía BPM ya promediados: solo suma como razón extra si ya hay caída.
+  Una lectura fuera de rango fisiológico es un problema del sensor, no
+  fatiga, y no entra a la ventana.
+- **Fusión:** un episodio de fatiga exige señal visual **y** fisiológica
+  al mismo tiempo (RF05). El riesgo depende de cuántas razones concretas
+  se acumulan: 2 → **medio**, 3 o más → **alto**. No existe riesgo "bajo".
+  Con **un solo canal** el estado es **vigilancia**: no guarda episodio,
+  pero no cuenta como normal. La app avisa con una notificación al
+  conductor y al supervisor, el panel web muestra un aviso, y el
+  historial de ambos marca esos minutos como *Vigilancia*.
+- **Buzzer:** suena solo mientras el estado es **alerta** y también
+  cuando un supervisor pulsa *Despertar* (hasta 15 s, 5 s por defecto).
 
 Todos los umbrales están centralizados como constantes al inicio de
 `vision.py`, `pulse.py` y `fusion.py` — ajústenlos con datos reales

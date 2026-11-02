@@ -32,6 +32,9 @@ class LiveController extends ChangeNotifier {
 
   /// Minutos recientes sin alerta, ya resumidos por el servidor (máx. 20).
   List<Map<String, dynamic>> normales = [];
+
+  /// Minutos recientes en vigilancia (un solo canal con indicios), máx. 20.
+  List<Map<String, dynamic>> vigilancias = [];
   Map<String, dynamic> counts = {};
   Set<int> freshIds = {};
   int? _maxId;
@@ -70,6 +73,7 @@ class LiveController extends ChangeNotifier {
     status = null;
     events = [];
     normales = [];
+    vigilancias = [];
     counts = {};
     freshIds = {};
     _maxId = null;
@@ -116,6 +120,7 @@ class LiveController extends ChangeNotifier {
       final next = ((data['events'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
       counts = ((data['counts_by_risk'] as Map?) ?? const {}).cast<String, dynamic>();
       normales = ((data['normales'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
+      vigilancias = ((data['vigilancias'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
 
       final fresh = <int>{};
       if (_maxId != null) {

@@ -139,7 +139,9 @@ def _forbidden(request: Request, exc: auth.Forbidden):
 
 
 def _persist(session_id: str, event) -> None:
-    """Guarda el evento de fatiga (si lo hubo) o suma una lectura normal."""
+    """Guarda el evento de fatiga (si lo hubo) o suma una lectura normal.
+    Solo cuenta como normal el estado "normal": no la vigilancia ni las lecturas
+    de una alerta que sigue abierta (esas no generan evento nuevo)."""
     if event:
         database.save_event(
             session_id=event.session_id,
@@ -152,7 +154,7 @@ def _persist(session_id: str, event) -> None:
             ear=event.ear,
             sensor_warning=event.sensor_warning,
         )
-    else:
+    elif fusion_engine.get_current_status(session_id)["status"] == "normal":
         database.increment_normal_reading(session_id)
 
 
@@ -241,6 +243,21 @@ async def receive_pulse(bpm: float = Form(...), session_id: str = Form(DEFAULT_S
     }
 
 
+# El resumen por minuto revisa hasta 24 h de lecturas y cambia despacio, pero
+# /eventos se consulta cada 4 s: se recalcula como mucho una vez por este intervalo.
+MINUTES_CACHE_SECONDS = 30
+_minutes_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _minute_summary(session_id: str) -> dict:
+    cached = _minutes_cache.get(session_id)
+    if cached and time.time() - cached[0] < MINUTES_CACHE_SECONDS:
+        return cached[1]
+    summary = database.minute_summary(session_id)
+    _minutes_cache[session_id] = (time.time(), summary)
+    return summary
+
+
 @app.get("/eventos")
 def get_events(session_id: str | None = None, limit: int = 200, user: User = Depends(require("panel"))):
     """Historial de eventos de fatiga (RF07, RF09)."""
@@ -248,8 +265,8 @@ def get_events(session_id: str | None = None, limit: int = 200, user: User = Dep
     return {
         "events": database.list_events(session_id=session_id, limit=limit),
         "counts_by_risk": database.event_counts_by_risk(session_id=session_id),
-        # minutos normales recientes, ya resumidos (uno por minuto, máximo 20)
-        "normales": database.normal_minutes(session_id),
+        # minutos recientes ya resumidos: "normales" y "vigilancias" (máximo 20 de cada uno)
+        **_minute_summary(session_id),
     }
 
 

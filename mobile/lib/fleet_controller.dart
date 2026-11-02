@@ -19,6 +19,10 @@ class FleetController extends ChangeNotifier {
   /// En segundo plano se sigue sondeando, más despacio, para notificar episodios.
   static const everyBackground = Duration(seconds: 8);
 
+  /// La vigilancia puede ir y venir (un bostezo dura segundos): tiempo mínimo
+  /// entre dos avisos de la misma sesión.
+  static const watchCooldown = Duration(seconds: 60);
+
   List<Map<String, dynamic>> drivers = [];
   Map<String, dynamic> summary = {};
   bool loaded = false;
@@ -27,11 +31,19 @@ class FleetController extends ChangeNotifier {
   /// Se llama con (conductor, evento) por cada episodio nuevo detectado.
   void Function(List<(Map<String, dynamic>, Map<String, dynamic>)> nuevos)? onNewEvents;
 
+  /// Se llama con los conductores que acaban de entrar en vigilancia. La
+  /// vigilancia no guarda eventos, por eso se detecta por el cambio de estado.
+  void Function(List<Map<String, dynamic>> enVigilancia)? onWatch;
+
   Timer? _timer;
   bool _busy = false;
 
   /// Último id de evento visto por sesión; null hasta la primera carga (no se avisa de lo viejo).
   Map<String, int>? _lastIds;
+
+  /// Último estado visto por sesión; null hasta la primera carga.
+  Map<String, String>? _lastEstados;
+  final _lastWatch = <String, DateTime>{};
 
   /// Datos del conductor de una sesión, si está en la flota.
   Map<String, dynamic>? driverFor(String? sessionId) {
@@ -61,6 +73,7 @@ class FleetController extends ChangeNotifier {
       summary = ((r['resumen'] as Map?) ?? const {}).cast<String, dynamic>();
       error = null;
       _detectNew();
+      detectWatch();
       loaded = true;
     } on ApiException catch (e) {
       error = e.status == 0 ? 'Sin conexión con el servidor' : e.message;
@@ -84,6 +97,27 @@ class FleetController extends ChangeNotifier {
     }
     _lastIds = ids;
     if (nuevos.isNotEmpty) onNewEvents?.call(nuevos);
+  }
+
+  /// Al PASAR a vigilancia desde un estado tranquilo. Si viene de una alerta ya
+  /// se avisó: bajar a vigilancia no es un aviso nuevo.
+  @visibleForTesting
+  void detectWatch() {
+    final prev = _lastEstados;
+    _lastEstados = {for (final d in drivers) d['session_id'] as String: '${d['estado']}'};
+    if (prev == null) return;
+    final now = DateTime.now();
+    final nuevos = <Map<String, dynamic>>[];
+    for (final d in drivers) {
+      final sid = d['session_id'] as String;
+      final antes = prev[sid] ?? '';
+      if (d['estado'] != 'vigilancia' || antes == 'vigilancia' || antes.startsWith('alerta')) continue;
+      final ultimo = _lastWatch[sid];
+      if (ultimo != null && now.difference(ultimo) < watchCooldown) continue;
+      _lastWatch[sid] = now;
+      nuevos.add(d);
+    }
+    if (nuevos.isNotEmpty) onWatch?.call(nuevos);
   }
 
   @override

@@ -239,6 +239,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     // Igual que el panel web: sin resumen CRISP-DM, y cada modelo aparece solo
     // cuando ya hay datos suficientes para calcularlo.
     bool ok(String k) => _map(r[k])['disponible'] == true;
+    const modelos = {
+      'clustering': 'K-Means',
+      'clasificacion': 'Árbol de decisión',
+      'anomalias': 'Anomalías',
+      'regresion': 'Regresión',
+    };
+    final pendientes = [
+      for (final m in modelos.entries)
+        if (!ok(m.key) && _map(r[m.key])['mensaje'] != null) (m.value, '${_map(r[m.key])['mensaje']}'),
+    ];
     return [
       _QualitySection(q: _map(r['calidad_datos'])),
       _DescriptiveSection(
@@ -250,6 +260,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       if (ok('clasificacion')) _ClassifySection(k: _map(r['clasificacion'])),
       if (ok('anomalias')) _AnomaliesSection(a: _map(r['anomalias']), labels: labels),
       if (ok('regresion')) RegressionSection(g: _map(r['regresion'])),
+      if (pendientes.isNotEmpty) _PendingSection(modelos: pendientes),
     ];
   }
 }
@@ -429,6 +440,45 @@ Widget _lineChart(List<(String, Color, List<double?>)> series, {double? minY, do
 // ---------------------------------------------------------------------------
 // Secciones del reporte
 // ---------------------------------------------------------------------------
+
+/// Los modelos sin datos no se dibujan: esta tarjeta dice qué les falta.
+class _PendingSection extends StatelessWidget {
+  const _PendingSection({required this.modelos});
+  final List<(String, String)> modelos;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      title: 'Modelos pendientes',
+      icon: Icons.hourglass_empty,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Note(
+            'Aparecen solos en cuanto haya datos suficientes. '
+            'Sigue recolectando lecturas con la cámara y el pulso a la vez.',
+          ),
+          for (final (nombre, mensaje) in modelos)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: '$nombre: ',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    TextSpan(text: mensaje),
+                  ],
+                ),
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _QualitySection extends StatelessWidget {
   const _QualitySection({required this.q});

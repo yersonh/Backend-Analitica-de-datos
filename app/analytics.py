@@ -1,9 +1,8 @@
 """
 Analítica / minería de datos para SIDFAM.
 
-Sigue la metodología CRISP-DM (el reporte incluye un resumen por fase en
-`crisp_dm`, ver crisp_dm_phases) sobre la tabla `sensor_readings`, que
-guarda CADA lectura recibida de los ESP32:
+Sigue la metodología CRISP-DM sobre la tabla `sensor_readings`, que guarda
+CADA lectura recibida de los ESP32:
 
   1. Comprensión del negocio -> objetivo y criterios de éxito
                                 (CRITERIO_RECALL / CRITERIO_PRECISION).
@@ -876,133 +875,7 @@ def full_report(session_id: str, ventana_s: int = VENTANA_DEFECTO_S) -> dict:
         "regresion": regression(w),
         "anomalias": anomalies(w),
     }
-    report["crisp_dm"] = crisp_dm_phases(report)
     return _clean(report)
-
-
-# ---------------------------------------------------------------------------
-# Resumen CRISP-DM
-# ---------------------------------------------------------------------------
-
-def _pct(v) -> str:
-    return "—" if v is None else f"{100 * v:.0f} %"
-
-
-def crisp_dm_phases(r: dict) -> list[dict]:
-    """Las 6 fases de CRISP-DM con lo que se hizo y lo que salió en ESTE
-    conjunto de datos. `estado`: "ok" o "atencion" (algo a mejorar)."""
-    q, d = r["calidad_datos"], r["descriptiva"]
-    clus, clas, reg, anom = r["clustering"], r["clasificacion"], r["regresion"], r["anomalias"]
-    ventana = r["parametros"]["ventana_s"]
-
-    # Mejor modelo supervisado disponible, para contrastar con los criterios de éxito
-    candidatos = []
-    if clas.get("disponible"):
-        candidatos.append(("Árbol de decisión", clas["metricas"]))
-    if reg.get("disponible") and reg["logistica"].get("disponible"):
-        candidatos.append(("Regresión logística", reg["logistica"]["metricas"]))
-    mejor = max(candidatos, key=lambda c: c[1]["f1"]) if candidatos else None
-    cumple = bool(mejor and mejor[1]["recall"] >= CRITERIO_RECALL and mejor[1]["precision"] >= CRITERIO_PRECISION)
-    etiqueta_real = bool(clas.get("disponible") and clas.get("advertencia") is None)
-
-    fases = [
-        {
-            "numero": 1, "fase": "Comprensión del negocio",
-            "pregunta": "¿Qué problema se resuelve y cómo se mide el éxito?",
-            "hallazgos": [
-                "Objetivo: detectar a tiempo la fatiga del conductor combinando la señal visual (cámara) y la "
-                "fisiológica (pulso), y alertar antes de un incidente.",
-                f"Criterio de éxito propuesto: recall ≥ {_pct(CRITERIO_RECALL)} (no dejar pasar fatiga real) y "
-                f"precisión ≥ {_pct(CRITERIO_PRECISION)} (pocas falsas alarmas).",
-                "Restricción: un evento de fatiga exige evidencia de los dos canales a la vez (RF05).",
-            ],
-            "estado": "ok",
-        },
-        {
-            "numero": 2, "fase": "Comprensión de los datos",
-            "pregunta": "¿Qué datos hay y qué calidad tienen?",
-            "hallazgos": [
-                f"{q['registros_iniciales']} lecturas: {q['lecturas_frame']} de cámara y {q['lecturas_pulso']} de "
-                f"pulso, de {q['sesiones']} sesión(es) y {q['personas']} persona(s).",
-                f"Frames sin rostro: {q['pct_frames_sin_rostro']} %. Pulsos implausibles: {q['bpm_implausibles']}. "
-                f"Pérdidas de comunicación: {q['perdidas_comunicacion']}.",
-                f"Autoreportes KSS: {q.get('autoreportes_kss', 0)} (cubren {q.get('ventanas_con_kss', 0)} "
-                f"ventanas; cada uno etiqueta los {int(KSS_MAX_AGE.total_seconds() // 60)} min siguientes).",
-            ],
-            "estado": "atencion" if q["pct_frames_sin_rostro"] > 30 or q.get("autoreportes_kss", 0) == 0 else "ok",
-        },
-        {
-            "numero": 3, "fase": "Preparación de los datos",
-            "pregunta": "¿Cómo se limpian e integran las dos fuentes?",
-            "hallazgos": [
-                f"Limpieza: {q['duplicados_eliminados']} duplicados eliminados, {q['bpm_implausibles']} BPM "
-                f"implausibles y {sum((q.get('atipicos_eliminados') or {}).values())} atípicos pasados a nulo.",
-                f"Integración: lecturas agrupadas en ventanas de {ventana} s con 8 variables (EAR medio, PERCLOS, "
-                "MAR máximo, bostezos, inclinación, BPM medio, desviación y caída vs. basal).",
-                f"Resultado: {d['ventanas_totales']} ventanas, {d['ventanas_completas']} completas para modelar.",
-            ],
-            "estado": "ok" if d["ventanas_completas"] >= MIN_WINDOWS_CLASSIFY else "atencion",
-        },
-        {
-            "numero": 4, "fase": "Modelado",
-            "pregunta": "¿Qué técnicas se aplicaron?",
-            "hallazgos": [
-                f"No supervisado: K-Means con k = {clus['k']} (silueta {clus['silueta']:.2f})." if clus.get("disponible")
-                else f"K-Means: {clus.get('mensaje')}",
-                f"Supervisado: árbol de decisión (profundidad 4) comparado con Random Forest, KNN, Naive Bayes "
-                f"y regresión logística." if clas.get("disponible") else f"Árbol de decisión: {clas.get('mensaje')}",
-                (f"Regresión elegida: {'lineal sobre el KSS' if reg['modelo_elegido'] == 'lineal' else 'logística'}. "
-                 f"{reg['motivo']}") if reg.get("disponible") else f"Regresión: {reg.get('mensaje')}",
-                f"Anomalías: Isolation Forest marcó {anom['anomalias_detectadas']} de {anom['ventanas_analizadas']} "
-                "ventanas." if anom.get("disponible") else f"Anomalías: {anom.get('mensaje')}",
-            ],
-            "estado": "ok" if clas.get("disponible") and reg.get("disponible") else "atencion",
-        },
-        {
-            "numero": 5, "fase": "Evaluación",
-            "pregunta": "¿Los modelos cumplen el objetivo del negocio?",
-            "hallazgos": (
-                [f"Mejor modelo supervisado: {mejor[0]} — recall {_pct(mejor[1]['recall'])}, "
-                 f"precisión {_pct(mejor[1]['precision'])}, F1 {mejor[1]['f1']:.2f}.",
-                 ("Cumple los criterios de éxito." if cumple else "Todavía NO cumple los criterios de éxito.")]
-                if mejor else ["Aún no hay modelos supervisados evaluables con estos datos."]
-            ) + [
-                "Etiqueta real (KSS): la evaluación es independiente de las reglas." if etiqueta_real else
-                "La etiqueta sale de las reglas de fusión: las métricas miden cuánto se reproducen las reglas, "
-                "no la fatiga real. Hace falta registrar KSS.",
-                clas.get("particion", "") and f"Partición: {clas['particion']}",
-            ],
-            "estado": "ok" if cumple and etiqueta_real else "atencion",
-        },
-        {
-            "numero": 6, "fase": "Despliegue",
-            "pregunta": "¿Cómo se usa el resultado?",
-            "hallazgos": [
-                "En producción: las reglas de fusion.py evalúan cada frame y pulso en tiempo real; las alertas "
-                "llegan al panel web y a la app móvil, y cada episodio queda registrado.",
-                "Esta analítica se recalcula a demanda desde la app o el panel para seguir a cada conductor.",
-            ] + _recomendaciones(q, clas, reg, cumple, etiqueta_real),
-            "estado": "ok",
-        },
-    ]
-    for f in fases:
-        f["hallazgos"] = [h for h in f["hallazgos"] if h]
-    return fases
-
-
-def _recomendaciones(q, clas, reg, cumple, etiqueta_real) -> list[str]:
-    rec = []
-    if not etiqueta_real:
-        rec.append("Recomendación: registrar el KSS cada 5 min durante las pruebas para tener una etiqueta real.")
-    if q["personas"] < MIN_PERSONAS_GRUPOS:
-        rec.append(f"Recomendación: probar con al menos {MIN_PERSONAS_GRUPOS} personas para validar separando por persona.")
-    if q["pct_frames_sin_rostro"] > 30:
-        rec.append("Recomendación: mejorar el encuadre o la iluminación de la cámara (muchos frames sin rostro).")
-    if cumple and etiqueta_real:
-        rec.append("Los umbrales del modelo pueden pasarse a fusion.py y validarse en carretera.")
-    elif clas.get("disponible") and not cumple:
-        rec.append("Recomendación: recalibrar umbrales (vision.py / pulse.py) y recoger más episodios de fatiga.")
-    return rec
 
 
 # ---------------------------------------------------------------------------

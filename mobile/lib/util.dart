@@ -151,7 +151,12 @@ const kRisk = <String, RiskStyle>{
   'advertencia_sensor': RiskStyle(C.violeta, 'Sensor', Icons.sensors),
 };
 
-RiskStyle riskStyle(String? r) => kRisk[r] ?? RiskStyle(C.gris, r ?? '—', Icons.info_outline);
+/// La vigilancia no es un nivel de riesgo guardado: va aparte de [kRisk], que
+/// alimenta los conteos por riesgo.
+const kWatch = RiskStyle(C.ambar, 'Vigilancia', Icons.error_outline);
+
+RiskStyle riskStyle(String? r) =>
+    r == 'vigilancia' ? kWatch : (kRisk[r] ?? RiskStyle(C.gris, r ?? '—', Icons.info_outline));
 
 const kKss = <int, String>{
   1: 'Extremadamente alerta',

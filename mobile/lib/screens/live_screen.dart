@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../live_controller.dart';
 import '../theme.dart';
 import '../util.dart';
+import '../widgets/camera_view.dart';
 import '../widgets/common.dart';
 import '../widgets/live_widgets.dart';
 
@@ -35,6 +36,23 @@ class LiveScreen extends StatelessWidget {
                 ),
               _Hero(s: s, st: st, keyName: key),
               if (app.can('todas_sesiones') || s['buzzer'] == true) _BuzzerCard(s: s, app: app),
+              // Solo para quien supervisa: el conductor no necesita verse mientras maneja
+              if (app.can('todas_sesiones'))
+                GlassCard(
+                  title: 'Cámara en vivo · lo que ve el modelo',
+                  icon: Icons.videocam_outlined,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      LiveCameraView(sessionId: app.sessionId),
+                      const SizedBox(height: 10),
+                      const Note(
+                        'Verde: normal. Rojo: ojos cerrados o bostezo. Naranja: cabeza inclinada. '
+                        'La franja superior es el estado de la fusión (cámara + pulso).',
+                      ),
+                    ],
+                  ),
+                ),
               _PulseCard(s: s, app: app),
               _FusionCard(s: s, st: st, keyName: key),
               _MetersCard(s: s, app: app),
@@ -261,7 +279,9 @@ class _PulseCardState extends State<_PulseCard> {
     final bpm = asDouble(s['bpm']);
     final mean = asDouble(s['bpm_mean']);
     final base = asDouble(s['baseline_bpm']);
-    final drop = (base != null && base != 0 && mean != null) ? (base - mean) / base : null;
+    // misma medida que usa la detección: la mediana de la ventana
+    final ref = asDouble(s['bpm_median']) ?? mean;
+    final drop = (base != null && base != 0 && ref != null) ? (base - ref) / base : null;
     final implausible = s['implausible_reading'] == true;
     final fisio = s['physiological_signal'] == true;
 
@@ -450,9 +470,9 @@ class _MetersCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ear = app.thr('ear'), mar = app.thr('mar'), tilt = app.thr('head_tilt_deg');
     final drop = app.thr('relative_drop'), std = app.thr('low_variability_std');
-    final base = asDouble(s['baseline_bpm']), mean = asDouble(s['bpm_mean']);
-    final dropV = (base != null && base != 0 && mean != null)
-        ? ((base - mean) / base).clamp(0.0, double.infinity)
+    final base = asDouble(s['baseline_bpm']), ref = asDouble(s['bpm_median']) ?? asDouble(s['bpm_mean']);
+    final dropV = (base != null && base != 0 && ref != null)
+        ? ((base - ref) / base).clamp(0.0, double.infinity)
         : null;
     final tiltV = asDouble(s['head_tilt_deg'])?.abs();
 
@@ -496,7 +516,7 @@ class _MetersCard extends StatelessWidget {
       (
         MeterSpec(
           name: 'Caída vs. basal',
-          hint: 'media 60s',
+          hint: 'mediana 60s',
           max: 0.2,
           thr: drop,
           isBad: (v) => v >= drop,
@@ -508,10 +528,10 @@ class _MetersCard extends StatelessWidget {
       (
         MeterSpec(
           name: 'Variabilidad',
-          hint: 'σ BPM',
+          hint: 'σ BPM · refuerza la caída',
           max: 8,
           thr: std,
-          isBad: (v) => v < std,
+          isBad: (_) => false,
           format: (v) => v.toStringAsFixed(2),
           thrLabel: 'σ $std',
         ),

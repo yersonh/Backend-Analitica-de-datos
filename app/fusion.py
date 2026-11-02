@@ -7,7 +7,9 @@ genera cuando hay señal visual (ojos/bostezo/cabeceo) Y señal
 fisiológica de somnolencia (caída relativa del pulso respecto al
 basal; la baja variabilidad solo refuerza) frescas simultáneamente.
 
-  - Solo un canal activo            -> status "vigilancia" (no confirmado)
+  - Solo un canal activo            -> status "vigilancia" (no confirmado):
+                                       no guarda evento, pero la app y el
+                                       panel avisan al entrar en este estado
   - Ambos canales activos           -> status "alerta"; risk_level según
                                        cuántas razones concretas se
                                        acumularon (2 -> "medio", 3+ -> "alto")
@@ -283,6 +285,7 @@ class FusionEngine:
             "yawning": vision.yawning if vision else False,
             "head_tilted": vision.head_tilted if vision else False,
             "bpm_mean": pulse.bpm_mean if pulse else None,
+            "bpm_median": pulse.bpm_median if pulse else None,
             "bpm_std": pulse.bpm_std if pulse else None,
         }
 

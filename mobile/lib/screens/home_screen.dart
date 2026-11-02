@@ -42,7 +42,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
 
   /// Solo para quien ve todas las sesiones (supervisor, administrador).
   late final FleetController? _fleet = _app.can('todas_sesiones')
-      ? (FleetController(_app)..onNewEvents = _fleetAlert)
+      ? (FleetController(_app)
+          ..onNewEvents = _fleetAlert
+          ..onWatch = _fleetWatch)
       : null;
   String? _session;
   int _tab = 0;
@@ -53,7 +55,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
   bool _alarmVisible = false;
   String _alarmTitle = '';
   String _alarmDetail = '';
+  String _alarmAction = '';
   Timer? _buzz;
+
+  // Vigilancia del conductor: un solo canal con indicios, aviso ámbar.
+  bool _alarmWatch = false;
+  DateTime? _lastWatch;
 
   @override
   void initState() {
@@ -93,8 +100,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     // solo cuenta el estado en vivo (no lo "guardado" tras un reinicio del servidor)
     final now = s != null && s['data_is_fresh'] == true && s['saved'] != true ? s['status'] as String? : null;
     if (now == 'alerta' && _lastStatus != 'alerta') _drowsyAlert(s!);
-    if (now != 'alerta' && _alarmVisible) _dismissAlarm();
+    // al supervisor la vigilancia se la avisa la flota, de cualquier conductor
+    if (now == 'vigilancia' && _fleet == null && _lastStatus != 'vigilancia' && _lastStatus != 'alerta') {
+      _watchAlert(s!);
+    }
+    if (now != 'alerta' && _alarmVisible && !_alarmWatch) _dismissAlarm();
     _lastStatus = now;
+  }
+
+  String _watchDetail(dynamic detail) =>
+      (detail as String?)?.isNotEmpty == true ? detail as String : 'Un solo canal muestra indicios de fatiga';
+
+  /// Conductor al entrar en vigilancia: notificación del sistema y aviso ámbar.
+  void _watchAlert(Map<String, dynamic> s) {
+    final ahora = DateTime.now();
+    if (_lastWatch != null && ahora.difference(_lastWatch!) < FleetController.watchCooldown) return;
+    _lastWatch = ahora;
+    const title = 'Posible somnolencia · En vigilancia';
+    final detail = _watchDetail(s['detail']);
+    const action = 'Si sientes sueño, detente en un lugar seguro.';
+    Notifier.show(title, '$detail. $action');
+    if (!mounted) return;
+    setState(() {
+      _alarmVisible = true;
+      _alarmWatch = true;
+      _alarmTitle = title;
+      _alarmDetail = detail;
+      _alarmAction = action;
+    });
+    HapticFeedback.heavyImpact();
+    _buzz?.cancel();
+    // no exige tocar la pantalla mientras conduce: se oculta solo
+    _buzz = Timer(const Duration(seconds: 20), _dismissAlarm);
+  }
+
+  /// Supervisor: un conductor entró en vigilancia, aunque no sea el que está mirando.
+  void _fleetWatch(List<Map<String, dynamic>> drivers) {
+    for (final d in drivers) {
+      final quien = d['conductor'] ?? d['session_id'];
+      Notifier.show('$quien · En vigilancia', '${_watchDetail(d['detail'])}. Aún sin confirmar: revisa al conductor.');
+    }
+    if (!_foreground) return;
+    _alert([
+      for (final d in drivers)
+        {'risk_level': 'vigilancia', 'detail': _watchDetail(d['detail']), '_quien': d['conductor'] ?? d['session_id']},
+    ]);
   }
 
   void _drowsyAlert(Map<String, dynamic> s) {
@@ -104,13 +154,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     final detail = (s['detail'] as String?)?.isNotEmpty == true
         ? s['detail'] as String
         : 'Señal visual y de pulso al mismo tiempo';
+    // quien supervisa no va manejando: su acción es comunicarse con el conductor
+    final action = _fleet != null ? 'Comunícate con el conductor.' : 'Detente en un lugar seguro y descansa.';
     // notificación del sistema: suena y vibra también con la app minimizada o la pantalla bloqueada
-    Notifier.show(title, '$detail. Detente en un lugar seguro y descansa.');
+    Notifier.show(title, '$detail. $action');
     if (!mounted) return;
     setState(() {
       _alarmVisible = true;
+      _alarmWatch = false;
       _alarmTitle = title;
       _alarmDetail = detail;
+      _alarmAction = action;
     });
     HapticFeedback.heavyImpact();
     _buzz?.cancel();
@@ -163,7 +217,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     final messenger = ScaffoldMessenger.of(context);
     for (final e in nuevos) {
       final r = riskStyle(e['risk_level'] as String?);
-      final what = e['risk_level'] == 'advertencia_sensor' ? 'Advertencia de sensor' : 'Nuevo episodio · ${r.label}';
+      final what = switch (e['risk_level']) {
+        'advertencia_sensor' => 'Advertencia de sensor',
+        'vigilancia' => 'En vigilancia',
+        _ => 'Nuevo episodio · ${r.label}',
+      };
       final title = e['_quien'] != null ? '${e['_quien']} · $what' : what;
       messenger.showSnackBar(
         SnackBar(
@@ -368,7 +426,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
               duration: const Duration(milliseconds: 300),
               transitionBuilder: (child, a) => SizeTransition(sizeFactor: a, child: child),
               child: _alarmVisible
-                  ? _DrowsyBanner(title: _alarmTitle, detail: _alarmDetail, onAck: _dismissAlarm)
+                  ? _DrowsyBanner(
+                      title: _alarmTitle,
+                      detail: _alarmDetail,
+                      action: _alarmAction,
+                      watch: _alarmWatch,
+                      onAck: _dismissAlarm,
+                    )
                   : const SizedBox.shrink(),
             ),
           ),
@@ -387,25 +451,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
   }
 }
 
-/// Aviso rojo grande de somnolencia (el sonido lo da la notificación del sistema).
+/// Aviso grande de somnolencia, rojo o ámbar si es vigilancia [watch] (el sonido
+/// lo da la notificación del sistema).
 class _DrowsyBanner extends StatelessWidget {
-  const _DrowsyBanner({required this.title, required this.detail, required this.onAck});
+  const _DrowsyBanner({
+    required this.title,
+    required this.detail,
+    required this.action,
+    required this.watch,
+    required this.onAck,
+  });
   final String title;
   final String detail;
+  final String action;
+  final bool watch;
   final VoidCallback onAck;
 
   @override
   Widget build(BuildContext context) {
+    final color = watch ? C.ambar : C.rojo;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [C.rojo, Color(0xFFC2456A)]),
+          gradient: LinearGradient(colors: [color, watch ? const Color(0xFFB87A14) : const Color(0xFFC2456A)]),
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-              color: C.rojo.withValues(alpha: 0.45),
+              color: color.withValues(alpha: 0.45),
               blurRadius: 24,
               offset: const Offset(0, 10),
               spreadRadius: -6,
@@ -431,15 +505,15 @@ class _DrowsyBanner extends StatelessWidget {
             const SizedBox(height: 6),
             Text(detail, style: TextStyle(color: Colors.white.withValues(alpha: 0.92))),
             const SizedBox(height: 4),
-            const Text(
-              'Detente en un lugar seguro y descansa.',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+            Text(
+              action,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
             ),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton(
                 onPressed: onAck,
-                style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: C.rojo),
+                style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: color),
                 child: const Text('Entendido'),
               ),
             ),

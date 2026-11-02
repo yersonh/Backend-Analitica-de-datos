@@ -54,8 +54,9 @@ Request flow for both ingest endpoints (`app/main.py`):
 2. The result is pushed into `fusion_engine.update_vision()` / `update_pulse()`,
    which updates per-session state and re-evaluates fusion.
 3. If evaluation yields a `FatigueEvent`, `database.save_event()` writes a row;
-   otherwise `database.increment_normal_reading()` bumps that session's normal
-   counter (`reading_stats` table).
+   otherwise, only while the fusion status is `normal`,
+   `database.increment_normal_reading()` bumps that session's normal counter
+   (`reading_stats` table). `vigilancia` and open alerts do not count as normal.
 4. The endpoint returns the raw metrics plus `fatigue_event` (the risk level, or null).
 
 Each analysis module exposes a **single module-level singleton** instantiated at
@@ -76,13 +77,18 @@ standard EAR/MAR point ordering — changing them breaks the ratio math.
 **`app/pulse.py`** — stateful. Keeps a 60s sliding `deque` per `session_id`
 (`WINDOW_SECONDS`), needs `MIN_SAMPLES_FOR_ANALYSIS` readings before it reports.
 Drowsiness is judged **relative to the person's own baseline**, not absolute BPM:
-the first `BASELINE_SAMPLE_COUNT` plausible readings fix `baseline_bpm` (never
-recalculated); `relative_drop_signal` fires when the window mean falls
-`RELATIVE_DROP_THRESHOLD` (8%) below it. `low_variability` (std below
-`LOW_VARIABILITY_STD`) is an additional drowsiness cue.
-`physiological_drowsy_signal = relative_drop_signal or low_variability`. A reading
-outside `[PLAUSIBLE_BPM_MIN, PLAUSIBLE_BPM_MAX]` sets `implausible_reading` — a
-**data-quality flag, kept separate from fatigue evidence**. Assumes the ESP32
+the median of the first `BASELINE_SAMPLE_COUNT` plausible readings fixes
+`baseline_bpm` (never recalculated); `relative_drop_signal` fires when the window
+**median** falls `RELATIVE_DROP_THRESHOLD` (8%) below it. `bpm_median` is exposed
+in `/estado` so the drop meters show that same measure. `low_variability` (std below
+`LOW_VARIABILITY_STD`) never triggers on its own, because the ESP32 sends
+already-averaged BPM: it only adds a reason in `fusion.py` once there is a drop.
+The project's goal is collecting data, so that reason stays even if it makes
+`alto` common: it keeps high-risk cases reachable in tests.
+`physiological_drowsy_signal = relative_drop_signal`. A reading outside
+`[PLAUSIBLE_BPM_MIN, PLAUSIBLE_BPM_MAX]` sets `implausible_reading` — a
+**data-quality flag, kept separate from fatigue evidence** — and stays out of the
+window. Assumes the ESP32
 already sends computed BPM; raw IR/RED peak detection would go here.
 
 **`app/fusion.py`** — stateful, the decision core (RF05–RF07). Holds a
@@ -116,8 +122,7 @@ ephemeral (and `.dockerignore`d); Postgres is what survives deploys.
 **`app/analytics.py`** — offline data mining over `sensor_readings`, structured as
 CRISP-DM. `full_report()` cleans readings, aggregates them into time windows
 (`build_windows`, 8 `FEATURES`), then runs K-Means, a decision tree, `regression()`
-and Isolation Forest, and `crisp_dm_phases()` summarizes the six phases from those
-results. `regression()` picks **linear** (target = KSS 1-9) when enough varied KSS
+and Isolation Forest. `regression()` picks **linear** (target = KSS 1-9) when enough varied KSS
 self-reports exist and R² ≥ `MIN_R2_LINEAL`, else **logistic** (binary fatigue, via
 `_binary_target`: KSS ≥ 7 or the fusion-rule label); both share `_split`/`_cv`
 with the tree (split by person when ≥ 3 people). `users_overview()` feeds the
@@ -167,21 +172,28 @@ HMAC token as the cookie; the app sends it as `Authorization: Bearer` and
 Everything else reuses the existing JSON endpoints, so **changing a JSON
 response shape (`/estado`, `/eventos`, `/analitica/reporte`, `/api/usuarios`,
 `/api/flota`) means updating the matching screen in `mobile/lib/screens/`**.
-`/api/flota` (permission `todas_sesiones`) is mobile-only: every conductor/session
-with live status, last reading age and today's events, sorted by urgency; it backs
-the supervisor's "Flota" tab (`fleet_screen.dart`, polled every 3 s by
-`fleet_controller.dart`, which also alerts on new events from any session). Polling cadence
+`/api/flota` (permission `todas_sesiones`): every conductor/session with live
+status, last reading age and today's events, sorted by urgency; it backs the
+supervisor's "Flota" tab (`fleet_screen.dart`, polled every 3 s by
+`fleet_controller.dart`, which also alerts on new events from any session) and the
+same section in the web dashboard (`pollFleet`, with a "Despertar" buzzer button per
+driver). Supervisor features must exist on both web and app; the conductor's
+main client is the app. Polling cadence
 matches the web (1.5s status, 4s events) in `mobile/lib/live_controller.dart`.
-`/eventos` also returns `normales` (`database.normal_minutes`: up to 20 recent
-minutes with no alert/sensor warning, one row per minute with mean EAR/BPM);
-the app's Historial merges them with the episodes. The app mirrors the web's
+`/eventos` also returns `normales` and `vigilancias` (`database.minute_summary`:
+up to 20 recent minutes each, one row per minute with mean EAR/BPM; a minute with
+any `vigilancia` reading is never `normal`, and minutes with an alert/sensor
+warning are left out; cached `MINUTES_CACHE_SECONDS` per session in `main.py`);
+the Historial on web and app merges them with the episodes. The app mirrors the web's
 light pastel palette (`theme.dart`), hides the CRISP-DM summary and the model
-sections that are not `disponible`, and has no camera card.
+sections that are not `disponible` (a "Modelos pendientes" card says what is
+missing, on web too), and shows the camera card only with
+`todas_sesiones` (the conductor is driving and has no use for it).
 
 ## Firmware ↔ backend contract
 
 The camera sketch actually flashed is `camara` (repo root; QVGA, a frame every
-~333 ms for the live video on the web panel); `firmware/esp32cam_frame_sender` is the older
+~333 ms for the live video); `firmware/esp32cam_frame_sender` is the older
 reference (VGA, ~1.5s). Both POST `multipart/form-data` to `/frame` with fields
 `session_id` and `file` (JPEG). `firmware/esp32_pulse_sender` POSTs
 `application/x-www-form-urlencoded` `bpm` + `session_id` to `/pulso` every ~2s
@@ -205,7 +217,13 @@ reports `camara_activa`. `buzzer` is true while the fusion status is
 buzzer requests. In the app, `home_screen.dart` raises a drowsiness alarm when
 the live status *changes to* `alerta` (red banner + repeated vibration + a system
 notification on the `sidfam_somnolencia` channel); supervisors also get system
-notifications of fleet events. Both go through `mobile/lib/notifications.dart`;
+notifications of fleet events. `vigilancia` saves no event, so it is detected by
+status transition, only when entering from a non-alert state and at most once per
+session every 60 s (`FleetController.watchCooldown`): the conductor gets a system
+notification and an amber banner (`_watchAlert`, hides after 20 s), supervisors a
+system notification for any driver (`detectWatch` → `_fleetWatch`), and the web
+dashboard a toast (any driver with `todas_sesiones`, else the own session). App
+notifications go through `mobile/lib/notifications.dart`;
 for every role an Android foreground service (type `dataSync`,
 `android:stopWithTask="true"` in the manifest) keeps polling alive in the
 background (conductor: `_live` at a slower pace) — do not set the plugin's own

@@ -15,13 +15,16 @@ absoluto fijo. Por eso:
   1. Se aprende un `baseline_bpm` personal con las primeras
      BASELINE_SAMPLE_COUNT lecturas plausibles de la sesión y NO se
      recalcula (para no "perseguir" una caída gradual real).
-  2. Se marca `relative_drop_signal` cuando la media de la ventana cae
-     por debajo de `baseline_bpm * (1 - RELATIVE_DROP_THRESHOLD)`.
-  3. `low_variability` (std muy baja y sostenida) se SUMA como señal
-     adicional de somnolencia.
+  2. Se marca `relative_drop_signal` cuando la MEDIANA de la ventana cae
+     por debajo de `baseline_bpm * (1 - RELATIVE_DROP_THRESHOLD)`. La
+     mediana (también en el basal) resiste los picos de ruido del sensor.
+  3. `low_variability` (std muy baja y sostenida) NO es señal de
+     somnolencia por sí sola: el ESP32 envía BPM ya promediados y daría
+     falsos positivos. Solo suma como razón extra en la fusión cuando ya
+     hay caída sostenida.
   4. Una lectura fuera de [PLAUSIBLE_BPM_MIN, PLAUSIBLE_BPM_MAX] NO es
      fatiga: es un problema de calidad de dato (`implausible_reading`),
-     una alerta distinta de sensor.
+     una alerta distinta de sensor. Tampoco entra a la ventana de análisis.
 
 Si el sensor que finalmente se use entrega valores crudos (IR/RED)
 en lugar de BPM, este módulo es el lugar para agregar la detección
@@ -55,12 +58,13 @@ class PulseResult:
     has_enough_data: bool
     bpm_current: float | None = None
     bpm_mean: float | None = None
+    bpm_median: float | None = None            # la que decide relative_drop_signal
     bpm_std: float | None = None
     baseline_bpm: float | None = None
     low_variability: bool = False
     relative_drop_signal: bool = False
     implausible_reading: bool = False          # calidad de dato, NO fatiga
-    physiological_drowsy_signal: bool = False  # = relative_drop_signal OR low_variability
+    physiological_drowsy_signal: bool = False  # = relative_drop_signal
 
     def __post_init__(self):
         # Solo la caída sostenida respecto al basal es señal de somnolencia.
@@ -136,6 +140,7 @@ class PulseAnalyzer:
             has_enough_data=True,
             bpm_current=bpm,
             bpm_mean=mean_bpm,
+            bpm_median=median_bpm,
             bpm_std=std_bpm,
             baseline_bpm=baseline,
             low_variability=low_variability,
