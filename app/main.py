@@ -11,6 +11,7 @@ Endpoints:
   GET  /api/flota  -> todos los conductores con su estado, para supervisores (JSON).
   GET  /api/camara -> último frame de la cámara con la vista del modelo (JPEG).
   GET  /api/camara/stream -> la misma cámara como video en vivo (MJPEG), para el panel web.
+  POST /api/camara/dispositivo -> foto de la cámara del computador o del celular (con login).
   POST /api/buzzer -> un supervisor hace sonar el buzzer del conductor.
   GET  /            -> dashboard HTML (RF09, RF10).
 
@@ -85,6 +86,16 @@ DEFAULT_SESSION_ID = "default"
 _live_frames: dict[str, tuple[bytes, float]] = {}
 CAMERA_STALE_SECONDS = 10   # sin frames nuevos en este tiempo, la app muestra "sin video"
 
+# --- Cámara del dispositivo (computador o celular) ---
+# Mientras envíe, las fotos del ESP32-CAM de esa sesión se ignoran para no mezclar
+# dos cámaras en la misma fusión. Si deja de enviar, el ESP32 retoma solo.
+_device_camera_at: dict[str, float] = {}
+DEVICE_CAMERA_PRIORITY_SECONDS = 5
+
+
+def _device_camera_active(session_id: str) -> bool:
+    return time.time() - _device_camera_at.get(session_id, 0.0) < DEVICE_CAMERA_PRIORITY_SECONDS
+
 # --- Buzzer del dispositivo del conductor ---
 # Suena solo mientras haya alerta confirmada (RF06) o durante el tiempo que pida
 # un supervisor. El ESP32 no puede recibir llamadas del servidor (está detrás del
@@ -158,10 +169,8 @@ def _persist(session_id: str, event) -> None:
         database.increment_normal_reading(session_id)
 
 
-@app.post("/frame", dependencies=[Depends(auth.require_device)])
-async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEFAULT_SESSION_ID)):
-    """Recibe un frame JPEG del ESP32-CAM y lo procesa con MediaPipe."""
-    raw_bytes = await file.read()
+def _process_frame(raw_bytes: bytes, session_id: str) -> dict:
+    """Procesa un frame JPEG con MediaPipe, venga del ESP32-CAM o del dispositivo."""
     np_arr = np.frombuffer(raw_bytes, dtype=np.uint8)
     image_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
@@ -203,6 +212,36 @@ async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEF
         "nivel_riesgo": status["risk_level"],
         "buzzer": _buzzer_state(session_id, status)["buzzer"],
     }
+
+
+@app.post("/frame", dependencies=[Depends(auth.require_device)])
+async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEFAULT_SESSION_ID)):
+    """Recibe un frame JPEG del ESP32-CAM."""
+    raw_bytes = await file.read()
+    if _device_camera_active(session_id):
+        status = fusion_engine.get_current_status(session_id)
+        return {
+            "ignorado": True,   # esta sesión usa la cámara del dispositivo
+            "estado": status["status"],
+            "alerta": status["status"] == "alerta",
+            "nivel_riesgo": status["risk_level"],
+            "buzzer": _buzzer_state(session_id, status)["buzzer"],
+        }
+    return _process_frame(raw_bytes, session_id)
+
+
+@app.post("/api/camara/dispositivo")
+async def receive_device_frame(file: UploadFile = File(...), session_id: str | None = Form(None),
+                               user: User = Depends(require("panel"))):
+    """Recibe un frame de la cámara del computador o del celular. Va por aparte de
+    /frame: se autentica con el login del usuario y no con la clave del ESP32."""
+    session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
+    if session_id == analytics.TODAS:
+        raise HTTPException(status_code=422, detail="Elige una sesión concreta para enviar la cámara")
+    result = _process_frame(await file.read(), session_id)
+    if "error" not in result:
+        _device_camera_at[session_id] = time.time()
+    return result
 
 
 @app.post("/pulso", dependencies=[Depends(auth.require_device)])
@@ -289,6 +328,8 @@ def get_status(request: Request, session_id: str | None = None):
     status.update(_buzzer_state(session_id, status))
     frame = _live_frames.get(session_id)
     status["camara_activa"] = bool(frame and time.time() - frame[1] <= CAMERA_STALE_SECONDS)
+    status["camara_fuente"] = ("dispositivo" if _device_camera_active(session_id)
+                               else "esp32" if status["camara_activa"] else None)
     return status
 
 

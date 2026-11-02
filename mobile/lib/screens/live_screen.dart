@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../util.dart';
 import '../widgets/camera_view.dart';
 import '../widgets/common.dart';
+import '../widgets/device_camera.dart';
 import '../widgets/live_widgets.dart';
 
 class LiveScreen extends StatelessWidget {
@@ -36,22 +37,24 @@ class LiveScreen extends StatelessWidget {
                 ),
               _Hero(s: s, st: st, keyName: key),
               if (app.can('todas_sesiones') || s['buzzer'] == true) _BuzzerCard(s: s, app: app),
-              // Solo para quien supervisa: el conductor no necesita verse mientras maneja
-              if (app.can('todas_sesiones'))
-                GlassCard(
-                  title: 'Cámara en vivo · lo que ve el modelo',
-                  icon: Icons.videocam_outlined,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      LiveCameraView(sessionId: app.sessionId),
-                      const SizedBox(height: 10),
-                      const Note(
-                        'Verde: normal. Rojo: ojos cerrados o bostezo. Naranja: cabeza inclinada. '
-                        'La franja superior es el estado de la fusión (cámara + pulso).',
-                      ),
-                    ],
-                  ),
+              if (app.sessionId != 'todas')
+                CameraSourceCard(
+                  app: app,
+                  // El video de la ESP32 es para quien supervisa: el conductor no
+                  // necesita verse mientras maneja
+                  esp32View: app.can('todas_sesiones')
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            LiveCameraView(sessionId: app.sessionId),
+                            const SizedBox(height: 10),
+                            const Note(
+                              'Verde: normal. Rojo: ojos cerrados o bostezo. Naranja: cabeza inclinada. '
+                              'La franja superior es el estado de la fusión (cámara + pulso).',
+                            ),
+                          ],
+                        )
+                      : null,
                 ),
               _PulseCard(s: s, app: app),
               _FusionCard(s: s, st: st, keyName: key),

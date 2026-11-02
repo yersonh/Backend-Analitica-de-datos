@@ -104,4 +104,16 @@ class ApiClient {
     final r = await _send(() => _http.post(_uri(path), headers: _headers(), body: fields), path);
     return (_json(r) as Map).cast<String, dynamic>();
   }
+
+  /// Envía una foto de la cámara del celular (multipart, como la ESP32-CAM).
+  Future<void> postFrame(Uint8List jpeg, String? sessionId) async {
+    const path = '/api/camara/dispositivo';
+    await _send(() async {
+      final request = http.MultipartRequest('POST', _uri(path))
+        ..headers.addAll(_headers())
+        ..files.add(http.MultipartFile.fromBytes('file', jpeg, filename: 'frame.jpg'));
+      if (sessionId != null) request.fields['session_id'] = sessionId;
+      return http.Response.fromStream(await _http.send(request));
+    }, path);
+  }
 }

@@ -169,6 +169,10 @@ sidfam-backend/
   pero no cuenta como normal. La app avisa con una notificación al
   conductor y al supervisor, el panel web muestra un aviso, y el
   historial de ambos marca esos minutos como *Vigilancia*.
+- **Cámara:** por defecto la ESP32-CAM; en la web y en la app se puede elegir
+  *Este dispositivo* para usar la cámara del computador o del celular
+  (requiere HTTPS o `localhost`). Mientras esa cámara envía, el servidor
+  ignora las fotos del ESP32 de esa sesión, y el ESP32 retoma solo a los 5 s.
 - **Buzzer:** suena solo mientras el estado es **alerta** y también
   cuando un supervisor pulsa *Despertar* (hasta 15 s, 5 s por defecto).
 

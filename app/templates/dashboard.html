@@ -340,7 +340,11 @@
         .live-cam { display: none; position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 18px; overflow: hidden;
             background: #1e2147; border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
             box-shadow: 0 18px 40px -18px color-mix(in srgb, var(--accent) 70%, transparent); transition: border-color 0.8s, box-shadow 0.8s; }
-        .live-cam img { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .live-cam img, .live-cam video { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .live-cam video { display: none; transform: scaleX(-1); }   /* como un espejo */
+        .scanner.local .live-cam video { display: block; }
+        .scanner.local .live-cam img { display: none; }
+        .cam-source select { border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
         .cam-badge { position: absolute; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: 6px;
             padding: 4px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em;
             color: #fff; background: rgba(224, 96, 126, 0.9); }
@@ -735,6 +739,12 @@
             <div class="grow"></div>
             {% if "analitica" in perms or "analitica_propia" in perms %}<a class="chip chip-btn" href="#analitica" style="text-decoration:none">Analítica de datos ↓</a>{% endif %}
             <span class="chip">Sesión <b>{{ session_id }}</b></span>
+            {% if session_id != "todas" %}<label class="chip cam-source">Cámara
+                <select id="cam-source" aria-label="Cámara que envía las imágenes">
+                    <option value="esp32">ESP32-CAM</option>
+                    <option value="device">Este dispositivo</option>
+                </select>
+            </label>{% endif %}
             <span class="chip mono" id="clock">--:--:--</span>
             <button class="chip chip-btn" id="sound-btn" aria-pressed="false" title="Alerta sonora en eventos nuevos">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path id="sound-wave" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" opacity="0.3"/></svg>
@@ -832,6 +842,7 @@
                     <!-- Cámara en vivo (MJPEG): reemplaza al ojo animado mientras lleguen frames -->
                     <div class="live-cam">
                         <img id="cam-img" alt="Cámara en vivo del conductor con la vista del modelo">
+                        <video id="cam-local" muted playsinline aria-label="Vista de la cámara de este dispositivo"></video>
                         <span class="cam-badge"><i></i>EN VIVO</span>
                     </div>
                     <div class="noface">SIN ROSTRO</div>
@@ -995,7 +1006,7 @@
             <div class="an-head glass reveal">
                 <div>
                     <h2 class="an-title">Analítica de datos</h2>
-                    <div class="an-sub">Lecturas guardadas de la sesión <b>{{ session_id }}</b></div>
+                    <div class="an-sub">Lecturas guardadas de la sesión <b id="an-session">{{ session_id }}</b></div>
                 </div>
                 <div class="controls">
                     {% if "todas_sesiones" in perms %}<select id="session-select" aria-label="Sesión"></select>{% endif %}
@@ -1013,7 +1024,7 @@
             {% if "analitica" in perms and "todas_sesiones" in perms %}
             <section class="an-panel glass" id="comparar">
                 <h2>Comparar conductores</h2>
-                <p class="lead">Indicadores por persona, de mayor a menor riesgo. Haz clic en una fila para abrir su sesión.</p>
+                <p class="lead">Indicadores por persona, de mayor a menor riesgo. Haz clic en una fila para ver su análisis.</p>
                 <div id="cmp-content"><div class="loading">Calculando…</div></div>
             </section>
             {% endif %}
@@ -1628,17 +1639,79 @@
         }
         // Cámara en vivo: mientras /estado diga que llegan frames se mantiene abierto
         // el stream MJPEG (el navegador lo muestra como video); si no, vuelve el ojo.
-        let camOn = false;
+        let camOn = false, deviceOn = false;
         function setCamera(on) {
+            on = on && !deviceOn;   // con la cámara propia se ve el video local, que es más fluido
             if (on === camOn) return;
             camOn = on;
             const img = $("cam-img");
             if (on) img.src = `/api/camara/stream?${q}&t=${Date.now()}`;
             else img.removeAttribute("src");   // cierra la conexión
-            $("scanner").classList.toggle("has-cam", on);
+            $("scanner").classList.toggle("has-cam", on || deviceOn);
         }
         // Si el stream se corta (red, reinicio del servidor), el siguiente sondeo lo reabre
-        $("cam-img").addEventListener("error", () => { if (camOn) { camOn = false; $("scanner").classList.remove("has-cam"); } });
+        $("cam-img").addEventListener("error", () => { if (camOn) { camOn = false; $("scanner").classList.toggle("has-cam", deviceOn); } });
+
+        // Cámara de este dispositivo: el navegador toma una foto, espera la respuesta
+        // y solo entonces toma la siguiente, para no acumular envíos si la red va lenta.
+        const DEVICE_FRAME_MS = 200, DEVICE_WIDTH = 480, DEVICE_HEIGHT = 360;
+        let deviceStream = null;
+        const deviceCanvas = document.createElement("canvas");
+        deviceCanvas.width = DEVICE_WIDTH; deviceCanvas.height = DEVICE_HEIGHT;
+        async function deviceLoop(stream) {
+            const video = $("cam-local");
+            while (deviceStream === stream) {
+                const t0 = performance.now();
+                try {
+                    if (video.readyState >= 2) {
+                        deviceCanvas.getContext("2d").drawImage(video, 0, 0, DEVICE_WIDTH, DEVICE_HEIGHT);
+                        const blob = await new Promise(r => deviceCanvas.toBlob(r, "image/jpeg", 0.8));
+                        const form = new FormData();
+                        form.append("file", blob, "frame.jpg");
+                        form.append("session_id", SESSION);
+                        const r = await fetch("/api/camara/dispositivo", { method: "POST", body: form });
+                        if (r.status === 401) return toLogin();
+                    }
+                } catch (err) { console.error("No se pudo enviar la imagen", err); }
+                await new Promise(r => setTimeout(r, Math.max(0, DEVICE_FRAME_MS - (performance.now() - t0))));
+            }
+        }
+        function stopDeviceCam() {
+            if (deviceStream) deviceStream.getTracks().forEach(t => t.stop());
+            deviceStream = null; deviceOn = false;
+            $("cam-local").srcObject = null;
+            $("scanner").classList.remove("local");
+            $("scanner").classList.toggle("has-cam", camOn);
+        }
+        async function startDeviceCam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: false, video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+                });
+                setCamera(false);   // cierra el video del ESP32 antes de cambiar
+                deviceStream = stream; deviceOn = true;
+                const video = $("cam-local");
+                video.srcObject = stream;
+                await video.play();
+                $("scanner").classList.add("local", "has-cam");
+                deviceLoop(stream);
+                return true;
+            } catch (err) {
+                console.error(err);
+                stopDeviceCam();
+                toast({ risk_level: "camara", title: "No se pudo abrir la cámara", detail: "Revisa el permiso del navegador. Sigues con la ESP32-CAM.", c: "var(--rojo)", silent: true });
+                return false;
+            }
+        }
+        if ($("cam-source")) {
+            const key = "sidfam-cam-" + SESSION, sel = $("cam-source");
+            sel.addEventListener("change", async () => {
+                if (sel.value !== "device") stopDeviceCam();
+                else if (!await startDeviceCam()) sel.value = "esp32";
+                store.set(key, sel.value);
+            });
+            if (store.get(key, "esp32") === "device") { sel.value = "device"; sel.dispatchEvent(new Event("change")); }
+        }
 
         async function pollStatus() {
             try { applyStatus(await getJSON(`/estado?${q}`)); }
@@ -1768,6 +1841,10 @@
         if (typeof Chart === "undefined") { document.getElementById("an-content").innerHTML = '<section class="an-panel glass"><div class="empty">No se pudo cargar Chart.js (¿sin conexión a internet?).</div></section>'; return; }
         const PARAMS = new URLSearchParams(location.search);
         let VENTANA = PARAMS.get("ventana") || "60";
+        // Sesión que se analiza: los filtros la cambian sin recargar la página,
+        // así que el panel en vivo sigue en SESSION
+        let anSession = SESSION;
+        let reportSeq = 0;
         const C = { verde: "#3ea88c", ambar: "#d99a2b", rojo: "#e0607e", azul: "#7c8fe8", violeta: "#9b7ad8", gris: "#9a9cc0" };
         const STATUS_COLOR = { normal: C.verde, vigilancia: C.azul, alerta: C.rojo, advertencia_sensor: C.violeta };
         const CLUSTER_COLORS = [C.verde, C.ambar, C.rojo, C.azul, C.violeta, C.gris];
@@ -2084,34 +2161,47 @@
             </section>`;
         }
 
+        let showSession = () => {};
         async function loadSessions() {
             const sel = document.getElementById("session-select");
             const ws = document.getElementById("window-select");
             ws.value = VENTANA;
-            const go = () => { location.search = "?session_id=" + encodeURIComponent(sel ? sel.value : SESSION) + "&ventana=" + ws.value; };
+            const go = () => {
+                if (sel) anSession = sel.value;
+                VENTANA = ws.value;
+                document.getElementById("an-session").textContent = anSession;
+                const url = new URL(location.href);
+                url.searchParams.set("ventana", VENTANA);
+                history.replaceState(null, "", url);
+                loadReport();
+            };
+            showSession = (sid) => { if (sel) { sel.value = sid; go(); } };
             ws.onchange = go;
             if (!sel) return;   // sin "todas_sesiones" (conductor): solo su sesión
             try {
                 const r = await fetch("/sesiones").then(r => r.json());
                 const list = r.sesiones || [];
                 const total = list.reduce((a, s) => a + s.lecturas, 0);
-                if (SESSION !== "todas" && !list.some(s => s.session_id === SESSION)) list.unshift({ session_id: SESSION, lecturas: 0 });
+                if (anSession !== "todas" && !list.some(s => s.session_id === anSession)) list.unshift({ session_id: anSession, lecturas: 0 });
                 list.unshift({ session_id: "todas", lecturas: total, etiqueta: "Todas las sesiones" });
-                sel.innerHTML = list.map(s => `<option value="${esc(s.session_id)}" ${s.session_id === SESSION ? "selected" : ""}>${esc(s.etiqueta || s.session_id)} (${s.lecturas} lecturas)</option>`).join("");
+                sel.innerHTML = list.map(s => `<option value="${esc(s.session_id)}" ${s.session_id === anSession ? "selected" : ""}>${esc(s.etiqueta || s.session_id)} (${s.lecturas} lecturas)</option>`).join("");
                 sel.onchange = go;
             } catch (e) { console.error(e); }
         }
 
         async function loadReport() {
-            const q = "session_id=" + encodeURIComponent(SESSION) + "&ventana=" + encodeURIComponent(VENTANA);
+            const seq = ++reportSeq;   // si cambian el filtro a medias, gana el último
+            const q = "session_id=" + encodeURIComponent(anSession) + "&ventana=" + encodeURIComponent(VENTANA);
             if (document.getElementById("csv-raw")) {
-                document.getElementById("csv-raw").href = "/lecturas.csv?session_id=" + encodeURIComponent(SESSION);
+                document.getElementById("csv-raw").href = "/lecturas.csv?session_id=" + encodeURIComponent(anSession);
                 document.getElementById("csv-win").href = "/analitica/dataset.csv?" + q;
             }
             const box = document.getElementById("an-content");
+            box.style.minHeight = box.offsetHeight + "px";   // que la página no salte mientras carga
             box.innerHTML = `<div class="loading">Calculando analítica…</div>`;
             try {
                 const r = await fetch("/analitica/reporte?" + q).then(r => r.json());
+                if (seq !== reportSeq) return;
                 charts.splice(0).forEach(c => c.destroy());
                 if (!r.disponible) {
                     box.innerHTML = `<section class="an-panel glass"><div class="empty">${esc(r.mensaje)}<br><br>Deja los ESP32 enviando datos unos minutos y presiona <b>Recalcular</b>.</div></section>`;
@@ -2126,7 +2216,10 @@
                 chartsRegression(r.regresion || {});
             } catch (e) {
                 console.error(e);
+                if (seq !== reportSeq) return;
                 box.innerHTML = `<section class="an-panel glass"><div class="empty">No se pudo calcular la analítica. Revisa la consola del servidor.<br><span class="note">${esc(e.message)}</span></div></section>`;
+            } finally {
+                if (seq === reportSeq) box.style.minHeight = "";
             }
         }
 
@@ -2165,9 +2258,7 @@
                         ${kpi("Episodios de fatiga", n(t.episodios_fatiga, 0))}
                     </div>
                     ${rows ? `<div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Persona</th><th>Nivel</th><th>Episodios</th><th>Por hora</th><th>% alerta</th><th>% vigilancia</th><th>BPM medio</th><th>PERCLOS</th><th>KSS</th><th>Monitoreo</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Aún no hay conductores con datos.</div>`}`;
-                box.querySelectorAll("tr[data-session]").forEach(tr => tr.addEventListener("click", () => {
-                    location.search = "?session_id=" + encodeURIComponent(tr.dataset.session);
-                }));
+                box.querySelectorAll("tr[data-session]").forEach(tr => tr.addEventListener("click", () => showSession(tr.dataset.session)));
             } catch (e) {
                 console.error(e);
                 box.innerHTML = `<div class="empty">No se pudo calcular la comparación.<br><span class="note">${esc(e.message)}</span></div>`;

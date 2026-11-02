@@ -187,8 +187,8 @@ warning are left out; cached `MINUTES_CACHE_SECONDS` per session in `main.py`);
 the Historial on web and app merges them with the episodes. The app mirrors the web's
 light pastel palette (`theme.dart`), hides the CRISP-DM summary and the model
 sections that are not `disponible` (a "Modelos pendientes" card says what is
-missing, on web too), and shows the camera card only with
-`todas_sesiones` (the conductor is driving and has no use for it).
+missing, on web too), and shows the ESP32 video only with `todas_sesiones` (the
+conductor is driving and has no use for it), though anyone can pick the phone camera.
 
 ## Firmware ↔ backend contract
 
@@ -203,6 +203,16 @@ after 5 s without confirmation). All send `X-Device-Key` when their
 `DEVICE_API_KEY` constant is non-empty. If you change endpoint paths, field names,
 form vs. JSON encoding, or the `buzzer` field in `app/main.py`, update the
 matching sketch.
+
+**Device camera** (`POST /api/camara/dispositivo`, permission `panel`, multipart
+`file` + `session_id`): the computer's or phone's camera, chosen in the web header or
+the app's camera card, shares `_process_frame()` with `/frame` but never its auth.
+While it keeps sending (`DEVICE_CAMERA_PRIORITY_SECONDS`), `/frame` skips analysis for
+that session and answers `ignorado: true` with the same status/buzzer fields, so two
+cameras never mix in one fusion; the ESP32 resumes by itself when it stops. Web:
+`deviceLoop` in `dashboard.html`. App: `mobile/lib/widgets/device_camera.dart`.
+Never change `/frame`, its `X-Device-Key` auth or the sketches for this feature.
+`/estado` exposes `camara_fuente` (`dispositivo` / `esp32` / null).
 
 **Live camera and buzzer** (`app/main.py`, in memory only): `/frame` stores the
 last frame per session already annotated by `app/overlay.py` (mesh, eye/mouth
