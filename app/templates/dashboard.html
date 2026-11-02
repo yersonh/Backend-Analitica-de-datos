@@ -342,7 +342,8 @@
             box-shadow: 0 18px 40px -18px color-mix(in srgb, var(--accent) 70%, transparent); transition: border-color 0.8s, box-shadow 0.8s; }
         .live-cam img, .live-cam video { display: block; width: 100%; height: 100%; object-fit: cover; }
         .live-cam video { display: none; transform: scaleX(-1); }   /* como un espejo */
-        .scanner.local .live-cam video { display: block; }
+        .live-cam canvas { display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); pointer-events: none; }
+        .scanner.local .live-cam video, .scanner.local .live-cam canvas { display: block; }
         .scanner.local .live-cam img { display: none; }
         .cam-source select { border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
         .cam-badge { position: absolute; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: 6px;
@@ -843,6 +844,7 @@
                     <div class="live-cam">
                         <img id="cam-img" alt="Cámara en vivo del conductor con la vista del modelo">
                         <video id="cam-local" muted playsinline aria-label="Vista de la cámara de este dispositivo"></video>
+                        <canvas id="cam-mesh" aria-hidden="true"></canvas>
                         <span class="cam-badge"><i></i>EN VIVO</span>
                     </div>
                     <div class="noface">SIN ROSTRO</div>
@@ -1067,6 +1069,7 @@
     (() => {
         const SESSION = {{ session_id | tojson }};
         const THR = {{ thresholds | tojson }};
+        const MESH = {{ mesh_contours | tojson }};
         const CAN_FLEET = {{ ("todas_sesiones" in perms) | tojson }};
         const INITIAL_EVENTS = {{ events | tojson }};
         const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1654,23 +1657,50 @@
 
         // Cámara de este dispositivo: el navegador toma una foto, espera la respuesta
         // y solo entonces toma la siguiente, para no acumular envíos si la red va lenta.
-        const DEVICE_FRAME_MS = 200, DEVICE_WIDTH = 480, DEVICE_HEIGHT = 360;
+        const DEVICE_FRAME_MS = 200, DEVICE_WIDTH = 480;
         let deviceStream = null;
         const deviceCanvas = document.createElement("canvas");
-        deviceCanvas.width = DEVICE_WIDTH; deviceCanvas.height = DEVICE_HEIGHT;
+        // Vista del modelo sobre el video local: mismos colores que app/overlay.py
+        function drawMesh(d) {
+            const canvas = $("cam-mesh"), video = $("cam-local");
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+            }
+            const ctx = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+            if (!d || !d.malla) return;
+            const pts = d.malla.map(([x, y]) => [x * W, y * H]);
+            const s = W / 640, poly = (idx, color, close = true) => {
+                ctx.strokeStyle = color; ctx.lineWidth = 2 * s;
+                ctx.beginPath();
+                idx.forEach((i, n) => n ? ctx.lineTo(...pts[i]) : ctx.moveTo(...pts[i]));
+                if (close) ctx.closePath();
+                ctx.stroke();
+            };
+            ctx.fillStyle = "rgba(56, 189, 248, 0.55)";
+            pts.forEach(([x, y]) => ctx.fillRect(x - s, y - s, 2 * s, 2 * s));
+            MESH.ojos.forEach(ojo => poly(ojo, d.eyes_closed ? "#fb7185" : "#34d399"));
+            poly(MESH.boca, d.yawning ? "#fb7185" : "#34d399");
+            poly(MESH.linea, d.head_tilted ? "#fbbf24" : "#94a3b8", false);
+        }
         async function deviceLoop(stream) {
             const video = $("cam-local");
             while (deviceStream === stream) {
                 const t0 = performance.now();
                 try {
                     if (video.readyState >= 2) {
-                        deviceCanvas.getContext("2d").drawImage(video, 0, 0, DEVICE_WIDTH, DEVICE_HEIGHT);
+                        // conserva la proporción de la cámara: estirar la cara alteraría el EAR
+                        deviceCanvas.width = DEVICE_WIDTH;
+                        deviceCanvas.height = Math.round(DEVICE_WIDTH * video.videoHeight / video.videoWidth);
+                        deviceCanvas.getContext("2d").drawImage(video, 0, 0, deviceCanvas.width, deviceCanvas.height);
                         const blob = await new Promise(r => deviceCanvas.toBlob(r, "image/jpeg", 0.8));
                         const form = new FormData();
                         form.append("file", blob, "frame.jpg");
                         form.append("session_id", SESSION);
+                        form.append("malla", "true");
                         const r = await fetch("/api/camara/dispositivo", { method: "POST", body: form });
                         if (r.status === 401) return toLogin();
+                        if (deviceStream === stream) drawMesh(r.ok ? await r.json() : null);
                     }
                 } catch (err) { console.error("No se pudo enviar la imagen", err); }
                 await new Promise(r => setTimeout(r, Math.max(0, DEVICE_FRAME_MS - (performance.now() - t0))));
@@ -1679,6 +1709,8 @@
         function stopDeviceCam() {
             if (deviceStream) deviceStream.getTracks().forEach(t => t.stop());
             deviceStream = null; deviceOn = false;
+            const mesh = $("cam-mesh");
+            mesh.getContext("2d").clearRect(0, 0, mesh.width, mesh.height);
             $("cam-local").srcObject = null;
             $("scanner").classList.remove("local");
             $("scanner").classList.toggle("has-cam", camOn);

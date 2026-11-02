@@ -169,8 +169,9 @@ def _persist(session_id: str, event) -> None:
         database.increment_normal_reading(session_id)
 
 
-def _process_frame(raw_bytes: bytes, session_id: str) -> dict:
-    """Procesa un frame JPEG con MediaPipe, venga del ESP32-CAM o del dispositivo."""
+def _process_frame(raw_bytes: bytes, session_id: str, con_malla: bool = False) -> dict:
+    """Procesa un frame JPEG con MediaPipe, venga del ESP32-CAM o del dispositivo.
+    con_malla añade los puntos de la cara (0 a 1) para dibujarlos sobre el video local."""
     np_arr = np.frombuffer(raw_bytes, dtype=np.uint8)
     image_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
@@ -198,7 +199,7 @@ def _process_frame(raw_bytes: bytes, session_id: str) -> dict:
 
     _live_frames[session_id] = (overlay.annotate(image_bgr, vision_result, status), time.time())
 
-    return {
+    result = {
         "face_detected": vision_result.face_detected,
         "ear": vision_result.ear,
         "mar": vision_result.mar,
@@ -212,6 +213,12 @@ def _process_frame(raw_bytes: bytes, session_id: str) -> dict:
         "nivel_riesgo": status["risk_level"],
         "buzzer": _buzzer_state(session_id, status)["buzzer"],
     }
+    if con_malla:
+        alto, ancho = image_bgr.shape[:2]
+        result["head_tilted"] = vision_result.head_tilted
+        result["malla"] = ([[round(x / ancho, 4), round(y / alto, 4)] for x, y in vision_result.landmarks]
+                           if vision_result.landmarks else None)
+    return result
 
 
 @app.post("/frame", dependencies=[Depends(auth.require_device)])
@@ -232,13 +239,13 @@ async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEF
 
 @app.post("/api/camara/dispositivo")
 async def receive_device_frame(file: UploadFile = File(...), session_id: str | None = Form(None),
-                               user: User = Depends(require("panel"))):
+                               malla: bool = Form(False), user: User = Depends(require("panel"))):
     """Recibe un frame de la cámara del computador o del celular. Va por aparte de
     /frame: se autentica con el login del usuario y no con la clave del ESP32."""
     session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
     if session_id == analytics.TODAS:
         raise HTTPException(status_code=422, detail="Elige una sesión concreta para enviar la cámara")
-    result = _process_frame(await file.read(), session_id)
+    result = _process_frame(await file.read(), session_id, con_malla=malla)
     if "error" not in result:
         _device_camera_at[session_id] = time.time()
     return result
@@ -559,6 +566,12 @@ def dashboard(request: Request, session_id: str | None = None, user: User = Depe
             "session_id": session_id,
             "user": user,
             "perms": sorted(user.permisos),
+            # Contornos de la vista del modelo, para dibujarla sobre el video local
+            "mesh_contours": {
+                "ojos": [vision.LEFT_EYE, vision.RIGHT_EYE],
+                "boca": overlay.LIPS_OUTER,
+                "linea": [vision.LEFT_EYE_OUTER, vision.RIGHT_EYE_OUTER],
+            },
             # Umbrales reales para marcar el límite en las barras del dashboard
             "thresholds": {
                 "ear": vision.EAR_THRESHOLD,

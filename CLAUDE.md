@@ -210,7 +210,9 @@ the app's camera card, shares `_process_frame()` with `/frame` but never its aut
 While it keeps sending (`DEVICE_CAMERA_PRIORITY_SECONDS`), `/frame` skips analysis for
 that session and answers `ignorado: true` with the same status/buzzer fields, so two
 cameras never mix in one fusion; the ESP32 resumes by itself when it stops. Web:
-`deviceLoop` in `dashboard.html`. App: `mobile/lib/widgets/device_camera.dart`.
+`deviceLoop` in `dashboard.html`, which keeps the camera's aspect ratio (stretching
+the face would change the EAR) and sends `malla=true` to get the landmarks back and
+draw them over the smooth local video. App: `mobile/lib/widgets/device_camera.dart`.
 Never change `/frame`, its `X-Device-Key` auth or the sketches for this feature.
 `/estado` exposes `camara_fuente` (`dispositivo` / `esp32` / null).
 
