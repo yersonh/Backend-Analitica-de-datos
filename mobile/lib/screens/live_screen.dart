@@ -19,6 +19,8 @@ class LiveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
+    // la cámara del celular solo puede alimentar la sesión propia del usuario
+    final ownSession = app.sessionId != null && app.user?['session_id'] == app.sessionId;
     return ListenableBuilder(
       listenable: live,
       builder: (context, _) {
@@ -37,9 +39,12 @@ class LiveScreen extends StatelessWidget {
                 ),
               _Hero(s: s, st: st, keyName: key),
               if (app.can('todas_sesiones') || s['buzzer'] == true) _BuzzerCard(s: s, app: app),
-              if (app.sessionId != 'todas')
+              if (app.sessionId != 'todas' && (ownSession || app.can('todas_sesiones')))
                 CameraSourceCard(
+                  // key: al cambiar de sesión se apaga la cámara del celular
+                  key: ValueKey(app.sessionId),
                   app: app,
+                  allowDevice: ownSession,
                   // El video de la ESP32 es para quien supervisa: el conductor no
                   // necesita verse mientras maneja
                   esp32View: app.can('todas_sesiones')

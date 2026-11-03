@@ -207,6 +207,9 @@ matching sketch.
 **Device camera** (`POST /api/camara/dispositivo`, permission `panel`, multipart
 `file` + `session_id`): the computer's or phone's camera, chosen in the web header or
 the app's camera card, shares `_process_frame()` with `/frame` but never its auth.
+It only feeds the user's **own** `users.session_id` (403 otherwise, and no picker
+on web/app), so a supervisor/admin viewing a driver never mixes their face into
+that driver's data.
 While it keeps sending (`DEVICE_CAMERA_PRIORITY_SECONDS`), `/frame` skips analysis for
 that session and answers `ignorado: true` with the same status/buzzer fields, so two
 cameras never mix in one fusion; the ESP32 resumes by itself when it stops. Web:

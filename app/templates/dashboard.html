@@ -740,7 +740,7 @@
             <div class="grow"></div>
             {% if "analitica" in perms or "analitica_propia" in perms %}<a class="chip chip-btn" href="#analitica" style="text-decoration:none">Analítica de datos ↓</a>{% endif %}
             <span class="chip">Sesión <b>{{ session_id }}</b></span>
-            {% if session_id != "todas" %}<label class="chip cam-source">Cámara
+            {% if user.session_id and session_id == user.session_id %}<label class="chip cam-source">Cámara
                 <select id="cam-source" aria-label="Cámara que envía las imágenes">
                     <option value="esp32">ESP32-CAM</option>
                     <option value="device">Este dispositivo</option>

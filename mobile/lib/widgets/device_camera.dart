@@ -19,8 +19,11 @@ import '../theme.dart';
 import 'common.dart';
 
 class CameraSourceCard extends StatefulWidget {
-  const CameraSourceCard({super.key, required this.app, this.esp32View});
+  const CameraSourceCard({super.key, required this.app, this.esp32View, this.allowDevice = true});
   final AppState app;
+
+  /// La cámara del celular solo alimenta la sesión propia del usuario.
+  final bool allowDevice;
 
   /// Lo que se muestra mientras la fuente sea la ESP32-CAM.
   final Widget? esp32View;
@@ -170,14 +173,15 @@ class _CameraSourceCardState extends State<CameraSourceCard> with WidgetsBinding
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: false, icon: Icon(Icons.memory), label: Text('ESP32-CAM')),
-              ButtonSegment(value: true, icon: Icon(Icons.smartphone), label: Text('Este celular')),
-            ],
-            selected: {_device},
-            onSelectionChanged: _starting ? null : (s) => _select(s.first),
-          ),
+          if (widget.allowDevice)
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, icon: Icon(Icons.memory), label: Text('ESP32-CAM')),
+                ButtonSegment(value: true, icon: Icon(Icons.smartphone), label: Text('Este celular')),
+              ],
+              selected: {_device},
+              onSelectionChanged: _starting ? null : (s) => _select(s.first),
+            ),
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!, style: const TextStyle(color: C.rojo, fontSize: 12.5)),

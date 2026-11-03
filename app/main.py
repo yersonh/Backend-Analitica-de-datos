@@ -241,10 +241,14 @@ async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEF
 async def receive_device_frame(file: UploadFile = File(...), session_id: str | None = Form(None),
                                malla: bool = Form(False), user: User = Depends(require("panel"))):
     """Recibe un frame de la cámara del computador o del celular. Va por aparte de
-    /frame: se autentica con el login del usuario y no con la clave del ESP32."""
-    session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
-    if session_id == analytics.TODAS:
-        raise HTTPException(status_code=422, detail="Elige una sesión concreta para enviar la cámara")
+    /frame: se autentica con el login del usuario y no con la clave del ESP32.
+    Solo alimenta la sesión propia del usuario: un supervisor o administrador que
+    mira la sesión de un conductor no debe meter su cara en los datos de él."""
+    if not user.session_id:
+        raise auth.Forbidden("Tu cuenta no tiene una sesión propia: la cámara del dispositivo es solo para conductores.")
+    if session_id and session_id != user.session_id:
+        raise auth.Forbidden("La cámara del dispositivo solo puede enviar a tu propia sesión.")
+    session_id = user.session_id
     result = _process_frame(await file.read(), session_id, con_malla=malla)
     if "error" not in result:
         _device_camera_at[session_id] = time.time()
