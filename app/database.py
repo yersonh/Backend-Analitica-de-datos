@@ -266,7 +266,15 @@ def list_events(session_id: str | None = None, limit: int = 200) -> list[dict]:
     for e in events:
         if isinstance(e.get("timestamp"), datetime):
             e["timestamp"] = e["timestamp"].isoformat(timespec="seconds")
+        e["detail"] = _clean_detail(e.get("detail"))
     return events
+
+
+def _clean_detail(detail: str | None) -> str | None:
+    """Quita el prefijo 'SIMULADO: ' de los eventos de prueba al mostrarlos."""
+    if detail and detail.upper().startswith("SIMULADO:"):
+        return detail[len("SIMULADO:"):].lstrip()
+    return detail
 
 
 def increment_normal_reading(session_id: str) -> None:
@@ -466,7 +474,7 @@ def fleet_event_summary() -> dict[str, dict]:
         for r in _iso_rows(cur.fetchall()):
             ts = datetime.fromisoformat(r["timestamp"]) if isinstance(r["timestamp"], str) else r["timestamp"]
             out.setdefault(r["session_id"], {"hoy": {}, "ultimo": None})["ultimo"] = {
-                "id": r["id"], "risk_level": r["risk_level"], "detail": r["detail"],
+                "id": r["id"], "risk_level": r["risk_level"], "detail": _clean_detail(r["detail"]),
                 "age_seconds": max(0, round((datetime.now() - ts).total_seconds())),
             }
     return out
