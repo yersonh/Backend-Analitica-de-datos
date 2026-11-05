@@ -167,6 +167,10 @@ Flutter client of the same backend (`cd mobile && flutter analyze && flutter tes
 `flutter run` / `flutter build apk`). Auth: `POST /api/login` returns the same
 HMAC token as the cookie; the app sends it as `Authorization: Bearer` and
 `auth.get_current_user` accepts either (Bearer skips the CSRF origin check).
+The APK is distributed from GitHub Releases (asset `app-release.apk`, never
+committed): the public page `/app` (`descargar_app.html`, linked from the login)
+shows a QR + download button for `APK_URL` (env, defaults to this repo's
+`releases/latest/download/app-release.apk`; the release repo must be public).
 `/api/cuenta/clave` returns a fresh token because changing the password bumps
 `session_version`. `/api/config` supplies the thresholds the HTML gets inlined.
 Everything else reuses the existing JSON endpoints, so **changing a JSON

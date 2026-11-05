@@ -48,6 +48,7 @@ Ejecutar en desarrollo:
 
 import asyncio
 import io
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -597,6 +598,20 @@ def _safe_next(next_url: str | None) -> str:
     if next_url and next_url.startswith("/") and not next_url.startswith("//") and "\\" not in next_url:
         return next_url
     return "/"
+
+
+# El APK vive en GitHub Releases (no en el repo ni en la imagen Docker). El repo
+# de releases debe ser público para que el celular descargue sin iniciar sesión.
+APK_URL = os.getenv(
+    "APK_URL",
+    "https://github.com/yersonh/Backend-Analitica-de-datos/releases/latest/download/app-release.apk",
+)
+
+
+@app.get("/app", response_class=HTMLResponse)
+def app_download_page(request: Request):
+    """Página pública con el QR para descargar la app Android."""
+    return templates.TemplateResponse(request, "descargar_app.html", {"apk_url": APK_URL})
 
 
 @app.get("/login", response_class=HTMLResponse)

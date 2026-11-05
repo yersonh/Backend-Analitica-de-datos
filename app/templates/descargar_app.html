@@ -1,0 +1,59 @@
+{% extends "_base.html" %}
+{% block title %}SIDFAM — Descargar la app{% endblock %}
+
+{% block styles %}
+        .dl { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; }
+        .card { width: min(460px, 100%); padding: 32px 28px 28px; text-align: center; animation: fadeUp 0.8s both; }
+        .card h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.01em; }
+        .card .sub { color: var(--muted); font-size: 0.92rem; margin: 8px 0 22px; line-height: 1.5; }
+        .qr {
+            width: 232px; height: 232px; margin: 0 auto; padding: 14px; border-radius: 20px;
+            background: #fff; border: 1px solid var(--line); display: grid; place-items: center;
+        }
+        .qr svg { width: 100%; height: 100%; display: block; }
+        .qr .fallback { font-size: 0.8rem; color: var(--muted); }
+        .card .btn-primary { width: 100%; padding: 14px; font-size: 1rem; margin-top: 22px; text-decoration: none; }
+        .steps { text-align: left; margin: 22px 0 0; padding: 18px 0 0 20px; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--ink-2); line-height: 1.6; }
+        .steps li + li { margin-top: 4px; }
+        .back { display: inline-block; margin-top: 18px; font-size: 0.85rem; color: var(--muted); }
+{% endblock %}
+
+{% block content %}
+<main class="dl">
+    <section class="glass card" aria-labelledby="t">
+        <h1 id="t">App SIDFAM para Android</h1>
+        <div class="sub">Escanea el código con la cámara del celular para descargar el instalador.</div>
+        <div class="qr" id="qr" role="img" aria-label="Código QR de descarga de la app">
+            <span class="fallback">Cargando código…</span>
+        </div>
+        <a class="btn btn-primary" href="{{ apk_url }}" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+            <span>Descargar APK</span>
+        </a>
+        <ol class="steps">
+            <li>Abre el archivo <b>.apk</b> descargado.</li>
+            <li>Si Android lo pide, permite <b>instalar apps de origen desconocido</b> para el navegador.</li>
+            <li>Instala, abre SIDFAM e inicia sesión con tu cuenta.</li>
+        </ol>
+        <a class="back" href="/login">← Volver a iniciar sesión</a>
+    </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+    (() => {
+        const box = document.getElementById("qr");
+        const url = new URL({{ apk_url | tojson }}, location.href).href;
+        try {
+            const qr = qrcode(0, "M");
+            qr.addData(url);
+            qr.make();
+            box.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+        } catch (e) {
+            box.innerHTML = '<span class="fallback">No se pudo generar el código. Usa el botón de descarga.</span>';
+        }
+    })();
+</script>
+{% endblock %}
