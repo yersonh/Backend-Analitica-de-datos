@@ -606,6 +606,7 @@ APK_URL = os.getenv(
     "APK_URL",
     "https://github.com/yersonh/Backend-Analitica-de-datos/releases/latest/download/app-release.apk",
 )
+templates.env.globals["apk_url"] = APK_URL  # el login muestra el QR en línea
 
 
 @app.get("/app", response_class=HTMLResponse)

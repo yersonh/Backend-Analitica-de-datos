@@ -49,7 +49,37 @@
         .card .foot b { color: var(--ink-2); font-weight: 500; }
         .roles { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 
+        /* --- Descarga de la app --- */
+        .app-tile {
+            display: flex; align-items: center; gap: 14px; margin-top: 18px; padding: 14px 16px;
+            border-radius: 18px; text-decoration: none; color: var(--ink);
+            background: linear-gradient(135deg, rgba(108, 111, 214, 0.16), rgba(155, 122, 216, 0.2));
+            border: 1.5px solid rgba(108, 111, 214, 0.45);
+            box-shadow: 0 10px 28px -14px rgba(108, 111, 214, 0.8);
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            animation: fadeUp 0.8s 0.35s both;
+        }
+        .app-tile:hover { transform: translateY(-2px); border-color: rgba(108, 111, 214, 0.8); box-shadow: 0 16px 34px -14px rgba(108, 111, 214, 0.95); }
+        .app-tile .ico {
+            width: 46px; height: 46px; flex: none; border-radius: 14px; display: grid; place-items: center; color: #fff;
+            background: linear-gradient(135deg, #6c6fd6, #9b7ad8);
+            box-shadow: 0 0 0 0 rgba(108, 111, 214, 0.55); animation: appPulse 2.6s infinite;
+        }
+        .app-tile .ico svg { width: 24px; height: 24px; }
+        .app-tile .txt { flex: 1; min-width: 0; }
+        .app-tile .txt b { display: block; font-size: 0.98rem; }
+        .app-tile .txt span { font-size: 0.8rem; color: var(--ink-2); }
+        .app-tile .mob { display: none; }
+        .app-tile .mini-qr { width: 76px; height: 76px; flex: none; padding: 5px; border-radius: 10px; background: #fff; border: 1px solid var(--line); }
+        .app-tile .mini-qr:empty { display: none; }
+        .app-tile .mini-qr svg { width: 100%; height: 100%; display: block; }
+        .app-tile .chev { width: 20px; height: 20px; flex: none; color: var(--violeta); }
+        @keyframes appPulse { 0% { box-shadow: 0 0 0 0 rgba(108, 111, 214, 0.55); } 70%, 100% { box-shadow: 0 0 0 12px rgba(108, 111, 214, 0); } }
+        @media (prefers-reduced-motion: reduce) { .app-tile .ico { animation: none; } }
+
         @media (max-width: 900px) {
+            .app-tile .mini-qr, .app-tile .desk { display: none; }
+            .app-tile .mob { display: inline; }
             .login { grid-template-columns: 1fr; gap: 28px; padding: 28px 16px; }
             .brand h1 { font-size: 2.2rem; margin: 22px 0 10px; }
             .features { display: none; }
@@ -123,6 +153,18 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </button>
         </form>
+        <a class="app-tile" href="/app">
+            <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/><path d="M12 7v6M9.5 10.5 12 13l2.5-2.5"/></svg>
+            </div>
+            <div class="txt">
+                <b>Descarga la app para Android</b>
+                <span class="desk">Escanea el código con tu celular</span>
+                <span class="mob">Toca para descargar e instalar</span>
+            </div>
+            <div class="mini-qr" id="mini-qr" aria-hidden="true"></div>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </a>
         <div class="foot">
             ¿No tienes cuenta o olvidaste tu contraseña? <b>Pide a un administrador</b> que te cree una o te la restablezca.
             <div class="roles">
@@ -130,13 +172,25 @@
                 <span class="role-badge r-supervisor">Supervisor</span>
                 <span class="role-badge r-conductor">Conductor</span>
             </div>
-            <div style="margin-top: 14px;">📱 <a href="/app">Descarga la app para Android</a> (código QR).</div>
         </div>
     </section>
 </main>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+    (() => {
+        // QR en línea solo en pantallas grandes: en el celular basta con tocar la tarjeta
+        if (!matchMedia("(min-width: 901px)").matches || typeof qrcode === "undefined") return;
+        try {
+            const qr = qrcode(0, "M");
+            qr.addData(new URL({{ apk_url | tojson }}, location.href).href);
+            qr.make();
+            document.getElementById("mini-qr").innerHTML = qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true });
+        } catch (e) { /* sin QR la tarjeta sigue llevando a /app */ }
+    })();
+</script>
 <script>
     (() => {
         const form = document.getElementById("login-form");
