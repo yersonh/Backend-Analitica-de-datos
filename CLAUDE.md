@@ -190,7 +190,7 @@ any `vigilancia` reading is never `normal`, and minutes with an alert/sensor
 warning are left out; cached `MINUTES_CACHE_SECONDS` per session in `main.py`);
 the Historial on web and app merges them with the episodes. The app mirrors the web's
 light pastel palette (`theme.dart`), shows the six CRISP-DM phases in order (phase 1 criteria, phase 5
-`evaluacion` verdict from `analytics.evaluate_criteria`, phase 6 deployment) with an
+`evaluacion` verdict from `analytics.evaluate_criteria`, phase 6 deployment) with a
 phase conclusion box plus a "Qué muestra" note under each chart/table, all text from
 `analytics.interpret()` (report key `interpretacion`: `faseN` lists, phase 6 = recommendations,
 and `graficos[clave]` per chart, placed with `nota("clave")` on web and `ChartNote('clave')` in the
