@@ -253,6 +253,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     // Interpretación de cada fase (la genera el servidor: analytics.interpret)
     final interp = _map(r['interpretacion']);
     Widget i(String fase) => _InterpretationCard(lines: [for (final t in _list(interp[fase])) '$t']);
+    chartNotes = {
+      for (final e in _map(interp['graficos']).entries) e.key: [for (final t in _list(e.value)) '$t'],
+    };
     return [
       _BusinessSection(criterios: _map(params['criterios_exito'])),
       i('fase1'),
@@ -633,7 +636,7 @@ class _InterpretationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     if (lines.isEmpty) return const SizedBox.shrink();
     return GlassCard(
-      title: 'Interpretación',
+      title: 'Conclusión de la fase',
       icon: Icons.lightbulb_outline,
       accent: C.cyan,
       child: Column(
@@ -901,12 +904,14 @@ class _DescriptiveSection extends StatelessWidget {
             maxY: 100,
             xLabels: xLabels,
           ),
+          const ChartNote('serie'),
           const SubTitle('Distribución de ventanas por estado'),
           _barChart(
             labels: dist.keys.toList(),
             values: [for (final v in dist.values) asDouble(v) ?? 0],
             colors: [for (final k in dist.keys) _statusColor[k] ?? C.gris],
           ),
+          const ChartNote('estados'),
           const SubTitle('Episodios de fatiga por hora del día'),
           _barChart(
             labels: [for (var h = 0; h < 24; h++) '${h}h'],
@@ -914,6 +919,7 @@ class _DescriptiveSection extends StatelessWidget {
             colors: const [C.rojo],
             labelEvery: 3,
           ),
+          const ChartNote('hora'),
           const SubTitle('Frecuencia de episodios de fatiga por día'),
           _barChart(
             labels: [for (final k in dia.keys) k.length >= 10 ? k.substring(5) : k],
@@ -921,6 +927,7 @@ class _DescriptiveSection extends StatelessWidget {
             colors: const [C.ambar],
             labelEvery: (dia.length / 6).ceil().clamp(1, 1 << 30),
           ),
+          const ChartNote('dia'),
           const SubTitle('Estadísticos descriptivos por ventana'),
           SimpleTable(
             headers: const ['Variable', 'n', 'Media', 'Desv.', 'Mín.', 'Mediana', 'Máx.'],
@@ -945,6 +952,7 @@ class _DescriptiveSection extends StatelessWidget {
                 for (final v in labels.keys) [labels[v], for (final s in est.keys) n(_map(est[s])[v])],
               ],
             ),
+            const ChartNote('medias_estado'),
           ],
           if (corr != null) ...[
             const SubTitle('Matriz de correlación (Pearson)'),
@@ -968,6 +976,7 @@ class _DescriptiveSection extends StatelessWidget {
               'Azul = correlación positiva, rojo = negativa. Una correlación negativa entre EAR medio y '
               'PERCLOS es lo esperado: cuanto menos abiertos los ojos, mayor el porcentaje de tiempo con ojos cerrados.',
             ),
+            const ChartNote('correlacion'),
           ],
         ],
       ),
@@ -1071,6 +1080,7 @@ class _ClusterSection extends StatelessWidget {
             ),
           ),
           _legend([for (final nm in names) (nm, _clusterColor(nm, names))]),
+          const ChartNote('pca'),
           const SubTitle('Coeficiente de silueta según k'),
           _barChart(
             labels: [for (final kk in sil.keys) 'k=$kk'],
@@ -1078,6 +1088,7 @@ class _ClusterSection extends StatelessWidget {
             colors: [for (final kk in sil.keys) kk == '$k' ? C.azul : C.azul.withValues(alpha: 0.35)],
             height: 170,
           ),
+          const ChartNote('silueta'),
           const SubTitle('Centroides de cada grupo (unidades originales)'),
           SimpleTable(
             headers: ['Grupo', 'Ventanas', ...labels.values],
@@ -1090,6 +1101,7 @@ class _ClusterSection extends StatelessWidget {
                 ],
             ],
           ),
+          const ChartNote('centroides'),
           const SubTitle('Grupos vs. estado de la fusión por reglas'),
           SimpleTable(
             headers: ['Grupo \\ estado fusión', ..._list(cr['columnas']).map((x) => '$x')],
@@ -1098,6 +1110,7 @@ class _ClusterSection extends StatelessWidget {
                 ['${_list(cr['filas'])[i]}', ..._list(_list(cr['valores'])[i]).map((v) => '$v')],
             ],
           ),
+          const ChartNote('cruce'),
         ],
       ),
     );
@@ -1187,6 +1200,7 @@ class _ClassifySection extends StatelessWidget {
               'Verde = aciertos. Abajo a la izquierda están los falsos negativos (fatiga no detectada), el error '
               'más costoso en este problema.',
             ),
+            const ChartNote('confusion'),
           ],
           const SubTitle('Importancia de cada variable en el árbol'),
           for (final r in imp)
@@ -1217,6 +1231,7 @@ class _ClassifySection extends StatelessWidget {
                 ],
               ),
             ),
+          const ChartNote('importancia'),
           const SubTitle('Reglas aprendidas por el árbol'),
           Container(
             padding: const EdgeInsets.all(10),
@@ -1244,6 +1259,7 @@ class _ClassifySection extends StatelessWidget {
                 for (final r in comp) ['${r['modelo']}', n(r['f1_medio'], 3), '± ${n(r['f1_desv'], 3)}'],
               ],
             ),
+            const ChartNote('comparacion'),
           ],
         ],
       ),
@@ -1304,6 +1320,7 @@ class _AnomaliesSection extends StatelessWidget {
                   ],
               ],
             ),
+          const ChartNote('anomalias'),
         ],
       ),
     );

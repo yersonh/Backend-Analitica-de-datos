@@ -671,6 +671,8 @@
         /* Interpretación de cada fase */
         .analytics .interp { margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: rgba(108, 111, 214, 0.07); border: 1px solid rgba(108, 111, 214, 0.28); }
         .analytics .interp h3 { margin: 0 0 8px; font-size: 0.9rem; }
+        .analytics .interp-chart { margin-top: 10px; background: rgba(255, 255, 255, 0.55); border-style: dashed; }
+        .analytics .interp-chart h3 { font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
         .analytics .interp ul { margin: 0; padding-left: 18px; }
         .analytics .interp li { margin: 4px 0; font-size: 0.86rem; line-height: 1.5; }
         .analytics details.dict-more summary { cursor: pointer; font-weight: 600; font-size: 0.86rem; }
@@ -2017,17 +2019,17 @@
                 <p class="lead">Las lecturas de cámara (~cada 1,5 s) y de pulso (~cada 2 s) llegan en instantes distintos. Para integrarlas se agrupan en ventanas de ${params.ventana_s >= 60 ? (params.ventana_s / 60) + " min" : params.ventana_s + " s"} y en cada una se calculan las variables: EAR medio, PERCLOS (porcentaje de frames con ojos cerrados), MAR máximo, número de bostezos, inclinación media, BPM medio, su desviación y la caída porcentual del BPM respecto al basal de la persona. Resultado: <b>${n(d.ventanas_totales,0)}</b> ventanas, <b>${n(d.ventanas_completas,0)}</b> con todas las variables.</p>
                 ${diccionario}
                 <h3>Serie temporal por ventana</h3>
-                <div class="chart-box tall"><canvas id="ch-serie"></canvas></div>
+                <div class="chart-box tall"><canvas id="ch-serie"></canvas></div>${nota("serie")}
                 <div class="grid2">
-                    <div><h3>Distribución de ventanas por estado</h3><div class="chart-box"><canvas id="ch-estados"></canvas></div></div>
-                    <div><h3>Episodios de fatiga por hora del día</h3><div class="chart-box"><canvas id="ch-hora"></canvas></div></div>
+                    <div><h3>Distribución de ventanas por estado</h3><div class="chart-box"><canvas id="ch-estados"></canvas></div>${nota("estados")}</div>
+                    <div><h3>Episodios de fatiga por hora del día</h3><div class="chart-box"><canvas id="ch-hora"></canvas></div>${nota("hora")}</div>
                 </div>
                 <h3>Frecuencia de episodios de fatiga por día</h3>
-                <div class="chart-box"><canvas id="ch-dia"></canvas></div>
+                <div class="chart-box"><canvas id="ch-dia"></canvas></div>${nota("dia")}
                 <h3>Estadísticos descriptivos por ventana</h3>
                 <div class="table-wrap"><table><thead><tr><th>Variable</th><th>n</th><th>Media</th><th>Desv.</th><th>Mín.</th><th>Mediana</th><th>Máx.</th></tr></thead><tbody>${rows}</tbody></table></div>
-                ${byState}
-                ${heat}
+                ${byState}${byState ? nota("medias_estado") : ""}
+                ${heat}${heat ? nota("correlacion") : ""}
             </section>`;
         }
 
@@ -2095,11 +2097,11 @@
                     <div class="kpi"><div class="label">Varianza PCA</div><div class="value">${n((c.pca_varianza_explicada[0] + c.pca_varianza_explicada[1]) * 100, 1)} %</div><div class="hint">explicada por el gráfico 2D</div></div>
                 </div>
                 <div class="grid2">
-                    <div><h3>Ventanas proyectadas con PCA (2 componentes)</h3><div class="chart-box tall"><canvas id="ch-pca"></canvas></div></div>
-                    <div><h3>Coeficiente de silueta según k</h3><div class="chart-box tall"><canvas id="ch-sil"></canvas></div></div>
+                    <div><h3>Ventanas proyectadas con PCA (2 componentes)</h3><div class="chart-box tall"><canvas id="ch-pca"></canvas></div>${nota("pca")}</div>
+                    <div><h3>Coeficiente de silueta según k</h3><div class="chart-box tall"><canvas id="ch-sil"></canvas></div>${nota("silueta")}</div>
                 </div>
-                <h3>Centroides de cada grupo (unidades originales)</h3>${cent}
-                <h3>Grupos vs. estado de la fusión por reglas</h3>${cross}
+                <h3>Centroides de cada grupo (unidades originales)</h3>${cent}${nota("centroides")}
+                <h3>Grupos vs. estado de la fusión por reglas</h3>${cross}${nota("cruce")}
             </section>`;
         }
 
@@ -2149,13 +2151,13 @@
                             <tr><th>Real: sin fatiga</th>${cell(cm[0][0], true)}${cell(cm[0][1], false)}</tr>
                             <tr><th>Real: fatiga</th>${cell(cm[1][0], false)}${cell(cm[1][1], true)}</tr>
                         </tbody></table></div>
-                        <p class="note">Verde = aciertos. Abajo a la izquierda están los falsos negativos (fatiga no detectada), el error más costoso en este problema.</p>
+                        <p class="note">Verde = aciertos. Abajo a la izquierda están los falsos negativos (fatiga no detectada), el error más costoso en este problema.</p>${nota("confusion")}
                     </div>
-                    <div><h3>Importancia de cada variable en el árbol</h3><div class="chart-box"><canvas id="ch-imp"></canvas></div></div>
+                    <div><h3>Importancia de cada variable en el árbol</h3><div class="chart-box"><canvas id="ch-imp"></canvas></div>${nota("importancia")}</div>
                 </div>
                 <h3>Reglas aprendidas por el árbol</h3>
                 <pre class="rules">${esc(k.reglas)}</pre>
-                ${comp}
+                ${comp}${comp ? nota("comparacion") : ""}
             </section>`;
         }
 
@@ -2190,8 +2192,8 @@
                     <div class="kpi"><div class="label">RMSE</div><div class="value">${n(m.rmse, 2)}</div></div>
                     ${R.validacion_cruzada ? `<div class="kpi"><div class="label">R² validación cruzada</div><div class="value">${n(R.validacion_cruzada.r2_medio, 2)}</div><div class="hint">± ${n(R.validacion_cruzada.r2_desv, 2)} (${esc(R.validacion_cruzada.esquema)})</div></div>` : ""}
                 </div>
-                <div class="grid2"><div><h3>KSS real vs. predicho</h3><div class="chart-box"><canvas id="ch-lin"></canvas></div></div>
-                <div><h3>Coeficientes</h3>${coefTable(R.coeficientes, false)}</div></div>
+                <div class="grid2"><div><h3>KSS real vs. predicho</h3><div class="chart-box"><canvas id="ch-lin"></canvas></div>${nota("lin")}</div>
+                <div><h3>Coeficientes</h3>${coefTable(R.coeficientes, false)}${nota("coef_lin")}</div></div>
                 <pre class="rules">${esc(R.ecuacion)}</pre>`;
             } else {
                 html += `<h3>Regresión lineal</h3><div class="empty">${esc(R.mensaje)}</div>`;
@@ -2207,8 +2209,8 @@
                     <div class="kpi"><div class="label">F1</div><div class="value">${n(m.f1, 3)}</div></div>
                     <div class="kpi"><div class="label">AUC-ROC</div><div class="value">${n(m.auc, 3)}</div><div class="hint">0,5 = azar · 1 = perfecto</div></div>
                 </div>
-                <div class="grid2"><div><h3>Curva ROC (prueba)</h3><div class="chart-box"><canvas id="ch-roc"></canvas></div></div>
-                <div><h3>Coeficientes y odds ratio</h3>${coefTable(L.coeficientes, true)}
+                <div class="grid2"><div><h3>Curva ROC (prueba)</h3><div class="chart-box"><canvas id="ch-roc"></canvas></div>${nota("roc")}</div>
+                <div><h3>Coeficientes y odds ratio</h3>${coefTable(L.coeficientes, true)}${nota("coef_log")}
                 <p class="note">Odds ratio: cuánto se multiplican las probabilidades relativas de fatiga al subir esa variable una desviación estándar. Matriz de confusión (real × predicho): [[${cm[0]}], [${cm[1]}]]</p></div></div>
                 <pre class="rules">${esc(L.ecuacion)}</pre>`;
             } else {
@@ -2246,14 +2248,21 @@
                 <h2>Fase 4c · Modelado: anomalías con Isolation Forest</h2>
                 <p class="lead">Isolation Forest marca las ventanas cuya combinación de variables se aleja del patrón general (${esc(a.algoritmo)}). Pueden ser episodios de fatiga intensos o problemas de captura (mala iluminación, sensor mal puesto) que conviene revisar. Se detectaron <b>${a.anomalias_detectadas}</b> de ${a.ventanas_analizadas} ventanas.</p>
                 ${rows ? `<div class="table-wrap"><table><thead><tr><th>Ventana</th><th>Estado</th><th>Variable más atípica</th><th>Puntaje</th><th>${esc(L.ear_mean)}</th><th>${esc(L.perclos)}</th><th>${esc(L.yawn_count)}</th><th>${esc(L.tilt_abs_mean)}</th><th>${esc(L.bpm_mean)}</th><th>${esc(L.bpm_drop_pct)}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Sin anomalías.</div>`}
+                ${nota("anomalias")}
             </section>`;
         }
 
         // Los modelos sin datos no se dibujan: esta tarjeta dice qué les falta
-        // Recuadro "Interpretación" al final de la sección (antes de su último </section>)
+        // Interpretación de cada gráfica o tabla (analytics.interpret -> interpretacion.graficos)
+        let G = {};
+        function nota(clave) {
+            const lines = G[clave] || [];
+            return lines.length ? `<div class="interp interp-chart"><h3>Qué muestra</h3><ul>${lines.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>` : "";
+        }
+        // Recuadro "Conclusión de la fase" al final de la sección (antes de su último </section>)
         function withInterp(html, lines) {
             if (!html || !(lines || []).length) return html;
-            const box = `<div class="interp"><h3>Interpretación</h3><ul>${lines.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>`;
+            const box = `<div class="interp"><h3>Conclusión de la fase</h3><ul>${lines.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>`;
             const k = html.lastIndexOf("</section>");
             return k < 0 ? html + box : html.slice(0, k) + box + html.slice(k);
         }
@@ -2354,6 +2363,7 @@
                     return;
                 }
                 const I = r.interpretacion || {};
+                G = I.graficos || {};
                 const wi = (html, fase) => withInterp(html, I[fase]);
                 box.innerHTML = wi(renderBusiness(r.parametros), "fase1") + wi(renderQuality(r.calidad_datos), "fase2") +
                     wi(renderDescriptive(r.descriptiva, r.parametros), "fase3") +

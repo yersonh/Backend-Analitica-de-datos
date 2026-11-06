@@ -15,6 +15,50 @@ List<dynamic> _list(dynamic v) => (v as List?) ?? const [];
 // Regresión: logística (objetivo binario) o lineal (KSS continuo)
 // ---------------------------------------------------------------------------
 
+
+/// Interpretación de cada gráfica o tabla del reporte (interpretacion.graficos,
+/// la genera analytics.interpret en el servidor). La fija AnalyticsScreen al
+/// armar las secciones; ChartNote('clave') la muestra debajo de su gráfica.
+Map<String, List<String>> chartNotes = const {};
+
+class ChartNote extends StatelessWidget {
+  const ChartNote(this.clave, {super.key});
+  final String clave;
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = chartNotes[clave] ?? const <String>[];
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 8, bottom: 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: C.cardHi.withValues(alpha: 0.55),
+        border: Border.all(color: C.cyan.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('QUÉ MUESTRA', style: TextStyle(color: C.muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+          const SizedBox(height: 4),
+          for (final t in lines)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('•  ', style: TextStyle(color: C.cyan, fontWeight: FontWeight.w700)),
+                  Expanded(child: Text(t, style: const TextStyle(color: C.text, fontSize: 12.5, height: 1.4))),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class RegressionSection extends StatelessWidget {
   const RegressionSection({super.key, required this.g});
   final Map<String, dynamic> g;
@@ -267,6 +311,7 @@ class _LogisticBlock extends StatelessWidget {
               ),
             ),
           ),
+          const ChartNote('roc'),
         ],
         if (cm.length == 2) ...[
           const SubTitle('Matriz de confusión'),
@@ -281,6 +326,7 @@ class _LogisticBlock extends StatelessWidget {
         const SubTitle('Coeficientes (odds ratio por variable)'),
         _coefBars(_list(r['coeficientes']).map(_map).toList(), odds: true),
         _equation('${r['ecuacion']}'),
+        const ChartNote('coef_log'),
       ],
     );
   }
@@ -378,9 +424,11 @@ class _LinearBlock extends StatelessWidget {
           ),
         ),
         const Note('Puntos grises: la diagonal ideal (predicho = real).'),
+        const ChartNote('lin'),
         const SubTitle('Coeficientes'),
         _coefBars(_list(r['coeficientes']).map(_map).toList()),
         _equation('${r['ecuacion']}'),
+        const ChartNote('coef_lin'),
       ],
     );
   }

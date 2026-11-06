@@ -191,8 +191,10 @@ warning are left out; cached `MINUTES_CACHE_SECONDS` per session in `main.py`);
 the Historial on web and app merges them with the episodes. The app mirrors the web's
 light pastel palette (`theme.dart`), shows the six CRISP-DM phases in order (phase 1 criteria, phase 5
 `evaluacion` verdict from `analytics.evaluate_criteria`, phase 6 deployment) with an
-"Interpretación" box per phase whose text comes from `analytics.interpret()` (report key
-`interpretacion`, phase 6 = recommendations), so web and app never write their own, hides the model
+phase conclusion box plus a "Qué muestra" note under each chart/table, all text from
+`analytics.interpret()` (report key `interpretacion`: `faseN` lists, phase 6 = recommendations,
+and `graficos[clave]` per chart, placed with `nota("clave")` on web and `ChartNote('clave')` in the
+app, `widgets/model_sections.dart`), so web and app never write their own, hides the model
 sections that are not `disponible` (a "Modelos pendientes" card says what is
 missing, on web too), and shows the ESP32 video only with `todas_sesiones` (the
 conductor is driving and has no use for it), though anyone can pick the phone camera.
