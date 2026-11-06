@@ -1942,17 +1942,19 @@
 
         function renderQuality(q) {
             const a = q.atipicos_eliminados || {};
+            const rg = q.rangos_validos || {}, lim = (q.atipicos_limites || {}).bpm;
+            const rango = (r) => r ? `${n(r[0], 1)}–${n(r[1], 1)}` : "—";
             return `
             <section class="an-panel glass" id="calidad">
                 <h2>Fase 2 · Comprensión de los datos: calidad</h2>
-                <p class="lead">Se toman todas las lecturas crudas de la sesión (tabla <code>sensor_readings</code>) y se revisa su calidad: duplicados, faltantes, lecturas imposibles y atípicos. Los valores problemáticos se reemplazan por nulos en vez de borrar la fila completa.</p>
+                <p class="lead">Se toman todas las lecturas crudas de la sesión (tabla <code>sensor_readings</code>) y se revisa su calidad: duplicados, faltantes, lecturas imposibles y atípicos. Las lecturas duplicadas se eliminan; los demás valores problemáticos se reemplazan por nulos en vez de borrar la fila completa.</p>
                 <div class="kpis">
                     <div class="kpi"><div class="label">Registros</div><div class="value">${n(q.registros_iniciales, 0)}</div><div class="hint">${n(q.lecturas_frame,0)} frames · ${n(q.lecturas_pulso,0)} pulso</div></div>
-                    <div class="kpi"><div class="label">Duplicados</div><div class="value">${n(q.duplicados_eliminados, 0)}</div><div class="hint">eliminados</div></div>
+                    <div class="kpi"><div class="label">Duplicados</div><div class="value">${n(q.duplicados_eliminados, 0)}</div><div class="hint">eliminados: ${n(q.duplicados_exactos, 0)} exactos (misma hora) y ${n(q.duplicados_reenvios, 0)} reenvíos (mismos valores en &lt; 1 s)</div></div>
                     <div class="kpi"><div class="label">Frames sin rostro</div><div class="value">${n(q.frames_sin_rostro, 0)}</div><div class="hint">${n(q.pct_frames_sin_rostro,1)} % de los frames</div></div>
-                    <div class="kpi"><div class="label">BPM implausibles</div><div class="value">${n(q.bpm_implausibles, 0)}</div><div class="hint">fuera de 30–220 (error de sensor)</div></div>
-                    <div class="kpi"><div class="label">Inconsistentes</div><div class="value">${n(q.valores_inconsistentes, 0)}</div><div class="hint">EAR/MAR fuera de rango</div></div>
-                    <div class="kpi"><div class="label">Atípicos BPM</div><div class="value">${n(a.bpm || 0, 0)}</div><div class="hint">regla IQR × 3</div></div>
+                    <div class="kpi"><div class="label">BPM implausibles</div><div class="value">${n(q.bpm_implausibles, 0)}</div><div class="hint">fuera de ${rango(rg.bpm)} BPM (error de sensor)</div></div>
+                    <div class="kpi"><div class="label">Inconsistentes</div><div class="value">${n(q.valores_inconsistentes, 0)}</div><div class="hint">EAR fuera de ${rango(rg.ear)} o MAR fuera de ${rango(rg.mar)} (imposibles por definición)</div></div>
+                    <div class="kpi"><div class="label">Atípicos BPM</div><div class="value">${n(a.bpm || 0, 0)}</div><div class="hint">regla IQR × 3: fuera de ${rango(lim)} BPM</div></div>
                     <div class="kpi"><div class="label">Pérdidas de comunicación</div><div class="value">${n(q.perdidas_comunicacion, 0)}</div><div class="hint">${n(q.segundos_sin_comunicacion, 0)} s sin lecturas (huecos &gt; 10 s)</div></div>
                     <div class="kpi"><div class="label">Sesiones / personas</div><div class="value">${n(q.sesiones, 0)} / ${n(q.personas, 0)}</div><div class="hint">persona = texto antes de "_"</div></div>
                 </div>

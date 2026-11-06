@@ -90,6 +90,9 @@ KSS_SOMNOLIENTO = 7            # KSS >= 7 -> somnoliento (Åkerstedt & Gillberg,
 KSS_MAX_AGE = timedelta(minutes=10)  # un autoreporte etiqueta las ventanas de los 10 min siguientes
 PLAUSIBLE_BPM = (30, 220)      # mismo rango que pulse.py
 IQR_K = 3.0                    # factor IQR para atípicos (3 = solo atípicos extremos)
+EAR_RANGO = (0.0, 1.0)         # EAR posible por definición (ojo cerrado ... muy abierto)
+MAR_RANGO = (0.0, 2.0)         # MAR posible por definición (boca cerrada ... muy abierta)
+REENVIO_S = 1.0                # misma lectura repetida antes de esto = reenvío del dispositivo
 RANDOM_STATE = 42
 # Criterios de éxito (CRISP-DM fase 1). Propuestos para un sistema de
 # seguridad: perder fatiga real es peor que una falsa alarma, por eso se exige
@@ -179,10 +182,33 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     report: dict = {"registros_iniciales": int(len(df))}
     df = df.copy()
 
-    # Duplicados: misma sesión, mismo instante y misma fuente
+    # Duplicados exactos: misma sesión, mismo instante y misma fuente
     before = len(df)
     df = df.drop_duplicates(subset=["session_id", "timestamp", "source"])
-    report["duplicados_eliminados"] = int(before - len(df))
+    exactos = before - len(df)
+
+    # Reenvíos: el servidor pone la hora al recibir, así que si un ESP32 manda
+    # dos veces la misma lectura (p. ej. porque no le llegó la respuesta) las
+    # dos filas tienen horas distintas y no son duplicados exactos. Se marca
+    # como reenvío la lectura que repite los MISMOS valores medidos que la
+    # anterior de su sesión y fuente, a menos de REENVIO_S. El pulso llega cada
+    # ~2 s y las fotos cada ~0,33 s, y dos fotos distintas no dan el mismo EAR,
+    # MAR e inclinación hasta el último decimal. Los frames sin rostro no
+    # cuentan: todos tienen los valores vacíos aunque sean fotos distintas.
+    df = df.sort_values(["session_id", "source", "timestamp"])
+    valores = {"frame": ["ear", "mar", "head_tilt_deg"], "pulso": ["bpm"]}
+    reenvio = pd.Series(False, index=df.index)
+    for (_, fuente), g in df.groupby(["session_id", "source"]):
+        cols = valores.get(fuente)
+        if not cols or len(g) < 2:
+            continue
+        cerca = g["timestamp"].diff().dt.total_seconds() < REENVIO_S
+        iguales = (g[cols] == g[cols].shift()).all(axis=1) & g[cols].notna().all(axis=1)
+        reenvio.loc[g.index] = cerca & iguales
+    df = df[~reenvio]
+    report["duplicados_exactos"] = int(exactos)
+    report["duplicados_reenvios"] = int(reenvio.sum())
+    report["duplicados_eliminados"] = int(exactos + reenvio.sum())
 
     frames = df["source"] == "frame"
     pulses = df["source"] == "pulso"
@@ -201,9 +227,10 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     df.loc[implausible, "bpm"] = np.nan
 
     # Inconsistencias: valores imposibles por definición de la métrica
-    bad_ear = df["ear"].notna() & ((df["ear"] < 0) | (df["ear"] > 1))
-    bad_mar = df["mar"].notna() & ((df["mar"] < 0) | (df["mar"] > 2))
+    bad_ear = df["ear"].notna() & ((df["ear"] < EAR_RANGO[0]) | (df["ear"] > EAR_RANGO[1]))
+    bad_mar = df["mar"].notna() & ((df["mar"] < MAR_RANGO[0]) | (df["mar"] > MAR_RANGO[1]))
     report["valores_inconsistentes"] = int(bad_ear.sum() + bad_mar.sum())
+    report["rangos_validos"] = {"ear": list(EAR_RANGO), "mar": list(MAR_RANGO), "bpm": list(PLAUSIBLE_BPM)}
     df.loc[bad_ear, "ear"] = np.nan
     df.loc[bad_mar, "mar"] = np.nan
 
@@ -211,7 +238,7 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     # en EAR y MAR los valores extremos (ojos cerrados, bostezos) son
     # justamente la señal de fatiga, así que NO se tratan como ruido; para
     # ellos basta el control de inconsistencias de arriba.
-    outliers = {}
+    outliers, limites = {}, {}
     for col in ("bpm",):
         s = df[col].dropna()
         if len(s) < 10:
@@ -222,8 +249,10 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         lo, hi = q1 - IQR_K * iqr, q3 + IQR_K * iqr
         mask = df[col].notna() & ((df[col] < lo) | (df[col] > hi))
         outliers[col] = int(mask.sum())
+        limites[col] = [round(float(lo), 1), round(float(hi), 1)]
         df.loc[mask, col] = np.nan
     report["atipicos_eliminados"] = outliers
+    report["atipicos_limites"] = limites   # rango aceptado por la regla IQR
 
     # Pérdidas de comunicación: huecos sin lecturas de una fuente (caso de uso 3,
     # flujo alterno). Se distinguen de la ausencia de fatiga.

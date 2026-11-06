@@ -614,6 +614,9 @@ class _QualitySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final a = _map(q['atipicos_eliminados']);
+    final rg = _map(q['rangos_validos']);
+    final lim = _map(q['atipicos_limites'])['bpm'];
+    String rango(dynamic r) => r is List && r.length == 2 ? '${n(r[0], 1)}–${n(r[1], 1)}' : '—';
     return GlassCard(
       title: 'Fase 2 · Comprensión de los datos: calidad',
       child: Column(
@@ -621,8 +624,8 @@ class _QualitySection extends StatelessWidget {
         children: [
           const Note(
             'Se toman todas las lecturas crudas de la sesión (tabla sensor_readings) y se revisa su calidad: '
-            'duplicados, faltantes, lecturas imposibles y atípicos. Los valores problemáticos se reemplazan por nulos '
-            'en vez de borrar la fila completa.',
+            'duplicados, faltantes, lecturas imposibles y atípicos. Las lecturas duplicadas se eliminan; los demás '
+            'valores problemáticos se reemplazan por nulos en vez de borrar la fila completa.',
           ),
           const SizedBox(height: 12),
           KpiGrid(
@@ -632,7 +635,12 @@ class _QualitySection extends StatelessWidget {
                 value: n(q['registros_iniciales'], 0),
                 hint: '${n(q['lecturas_frame'], 0)} frames · ${n(q['lecturas_pulso'], 0)} pulso',
               ),
-              KpiTile(label: 'Duplicados', value: n(q['duplicados_eliminados'], 0), hint: 'eliminados'),
+              KpiTile(
+                label: 'Duplicados',
+                value: n(q['duplicados_eliminados'], 0),
+                hint: 'eliminados: ${n(q['duplicados_exactos'], 0)} exactos (misma hora) y '
+                    '${n(q['duplicados_reenvios'], 0)} reenvíos (mismos valores en < 1 s)',
+              ),
               KpiTile(
                 label: 'Frames sin rostro',
                 value: n(q['frames_sin_rostro'], 0),
@@ -641,14 +649,14 @@ class _QualitySection extends StatelessWidget {
               KpiTile(
                 label: 'BPM implausibles',
                 value: n(q['bpm_implausibles'], 0),
-                hint: 'fuera de 30–220 (error de sensor)',
+                hint: 'fuera de ${rango(rg['bpm'])} BPM (error de sensor)',
               ),
               KpiTile(
                 label: 'Inconsistentes',
                 value: n(q['valores_inconsistentes'], 0),
-                hint: 'EAR/MAR fuera de rango',
+                hint: 'EAR fuera de ${rango(rg['ear'])} o MAR fuera de ${rango(rg['mar'])} (imposibles por definición)',
               ),
-              KpiTile(label: 'Atípicos BPM', value: n(a['bpm'] ?? 0, 0), hint: 'regla IQR × 3'),
+              KpiTile(label: 'Atípicos BPM', value: n(a['bpm'] ?? 0, 0), hint: 'regla IQR × 3: fuera de ${rango(lim)} BPM'),
               KpiTile(
                 label: 'Pérdidas de comunicación',
                 value: n(q['perdidas_comunicacion'], 0),
