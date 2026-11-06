@@ -1184,9 +1184,15 @@ def interpret(report: dict) -> dict:
             if ear.notna().sum() > 3 and per.size > 3:
                 r = ear.corr(pd.to_numeric(serie.get("perclos"), errors="coerce"))
                 if _num(r) is not None:
-                    g.append(f"El EAR (línea azul, ×100) se mantiene casi plano alrededor de {_f(ear.median() * 100, 0)}, "
-                             f"pero cuando baja el PERCLOS sube (r = {_f(r, 2)}): las dos líneas cuentan lo mismo, "
-                             "ojos más cerrados.")
+                    rel = ("las dos líneas cuentan casi lo mismo: ojos más cerrados" if r <= -0.7 else
+                           "van en sentidos opuestos, como se espera, aunque no siempre a la par" if r <= -0.4 else
+                           "la relación es débil: el PERCLOS sube y baja por momentos sin que el EAR medio cambie mucho")
+                    g.append(f"El EAR (línea azul, ×100) se mantiene alrededor de {_f(ear.median() * 100, 0)}; cuando baja, "
+                             f"el PERCLOS tiende a subir (r = {_f(r, 2)}, {_fuerza_r(r)}): {rel}.")
+                    if (ear.median() or 0) - vision.EAR_THRESHOLD < 0.07:
+                        g.append(f"El EAR típico ({_f(ear.median(), 2)}) está cerca del umbral de ojo cerrado "
+                                 f"({_f(vision.EAR_THRESHOLD, 2)}): entrecerrar los ojos o parpadear lento ya cuenta como "
+                                 "cerrado, por eso el PERCLOS oscila tanto. Conviene calibrar el umbral por persona.")
             if (q.get("sesiones") or 0) > 1:
                 g.append("La serie pone una sesión tras otra en orden de fecha: los saltos bruscos suelen ser el paso "
                          "de una prueba o persona a otra, no un cambio del conductor.")
