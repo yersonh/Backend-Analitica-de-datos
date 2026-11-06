@@ -285,14 +285,25 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     df = df.sort_values(["session_id", "source", "timestamp"])
     valores = {"frame": ["ear", "mar", "head_tilt_deg"], "pulso": ["bpm"]}
     reenvio = pd.Series(False, index=df.index)
+    detalle: list[dict] = []
     for (_, fuente), g in df.groupby(["session_id", "source"]):
         cols = valores.get(fuente)
         if not cols or len(g) < 2:
             continue
-        cerca = g["timestamp"].diff().dt.total_seconds() < REENVIO_S
+        dt = g["timestamp"].diff().dt.total_seconds()
         iguales = (g[cols] == g[cols].shift()).all(axis=1) & g[cols].notna().all(axis=1)
-        reenvio.loc[g.index] = cerca & iguales
+        marca = (dt < REENVIO_S) & iguales
+        reenvio.loc[g.index] = marca
+        for i in g.index[marca.values]:
+            detalle.append({
+                "session_id": g.at[i, "session_id"], "fuente": fuente,
+                "hora": g.at[i, "timestamp"],
+                "valores": {c: g.at[i, c] for c in cols},
+                "segundos_tras_original": round(float(dt.at[i]), 3),
+            })
     df = df[~reenvio]
+    detalle.sort(key=lambda r: r["hora"])
+    report["duplicados_detalle"] = detalle[:100]
     report["duplicados_exactos"] = int(exactos)
     report["duplicados_reenvios"] = int(reenvio.sum())
     report["duplicados_eliminados"] = int(exactos + reenvio.sum())
@@ -1008,6 +1019,297 @@ def evaluate_criteria(clasificacion: dict, regresion: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Interpretación de cada fase (texto generado a partir de los resultados)
+# ---------------------------------------------------------------------------
+
+def _num(v):
+    """float o None (también para NaN)."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(x) else x
+
+
+def _f(v, d: int = 1) -> str:
+    """Número con coma decimal y punto de miles, como en el panel."""
+    x = _num(v)
+    if x is None:
+        return "—"
+    if round(x, d) == 0:
+        x = 0.0   # evita "-0"
+    txt = f"{x:,.{d}f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return txt[:-(d + 1)] if d and txt.endswith("," + "0" * d) else txt
+
+
+def _pct(v, d: int = 1) -> str:
+    x = _num(v)
+    return "—" if x is None else f"{_f(x * 100, d)} %"
+
+
+def _fuerza_r(r: float) -> str:
+    a = abs(r)
+    return "fuerte" if a >= 0.7 else "moderada" if a >= 0.4 else "débil"
+
+
+def interpret(report: dict) -> dict:
+    """Lista de frases de interpretación por fase, a partir del propio reporte.
+    Claves: fase1, fase2, fase3, fase4a, fase4b, fase4c, fase4d, fase6."""
+    q = report.get("calidad_datos", {})
+    d = report.get("descriptiva", {})
+    cl = report.get("clustering", {})
+    k = report.get("clasificacion", {})
+    rg = report.get("regresion", {})
+    an = report.get("anomalias", {})
+    ev = report.get("evaluacion", {})
+    ventana = report.get("parametros", {}).get("ventana_s", VENTANA_DEFECTO_S)
+    L = FEATURE_LABELS
+    out: dict[str, list[str]] = {}
+    recomendaciones: list[str] = []
+
+    # --- Fase 1 ---
+    n_kss, v_kss = int(q.get("autoreportes_kss") or 0), int(q.get("ventanas_con_kss") or 0)
+    if n_kss == 0:
+        f1 = ("Todavía no hay autoreportes KSS. Sin ellos, los criterios de éxito solo se pueden comprobar "
+              "contra las reglas del propio sistema y no contra la somnolencia real de los conductores.")
+        recomendaciones.append("Registrar el autoreporte KSS durante las pruebas (sección «Autoreporte de "
+                               "somnolencia»), con momentos alerta y momentos de cansancio: es lo que permite "
+                               "validar el sistema de verdad.")
+    elif v_kss < MIN_WINDOWS_CLASSIFY:
+        f1 = (f"Hay {n_kss} autoreportes KSS que etiquetan {v_kss} ventanas; se necesitan al menos "
+              f"{MIN_WINDOWS_CLASSIFY} ventanas etiquetadas, con casos somnolientos y no somnolientos, para "
+              "evaluar contra la somnolencia real.")
+        recomendaciones.append("Seguir registrando el KSS hasta tener al menos "
+                               f"{MIN_WINDOWS_CLASSIFY} ventanas etiquetadas.")
+    else:
+        f1 = (f"Hay {n_kss} autoreportes KSS ({v_kss} ventanas etiquetadas): los modelos se pueden evaluar "
+              "contra la somnolencia que reportan los propios conductores.")
+    out["fase1"] = [f1]
+
+    # --- Fase 2 ---
+    f2 = []
+    total = int(q.get("registros_iniciales") or 0)
+    personas = int(q.get("personas") or 0)
+    f2.append(f"Se analizaron {_f(total, 0)} lecturas ({_f(q.get('lecturas_frame'), 0)} de cámara y "
+              f"{_f(q.get('lecturas_pulso'), 0)} de pulso) de {q.get('sesiones', 0)} sesiones y {personas} "
+              f"{'persona' if personas == 1 else 'personas'}, entre {str(q.get('desde', ''))[:16]} y {str(q.get('hasta', ''))[:16]}.")
+    if personas >= MIN_PERSONAS_GRUPOS:
+        f2.append(f"Con {personas} personas los modelos se evalúan con personas que no vieron al entrenar, "
+                  "así que la evaluación es realista.")
+    else:
+        f2.append(f"Con menos de {MIN_PERSONAS_GRUPOS} personas la evaluación usa una partición aleatoria y "
+                  "sus métricas salen optimistas.")
+        recomendaciones.append(f"Hacer pruebas con al menos {MIN_PERSONAS_GRUPOS} personas distintas.")
+    sin_rostro = _num(q.get("pct_frames_sin_rostro")) or 0
+    if sin_rostro < 10:
+        f2.append(f"La cámara detectó la cara en casi todos los frames (sin rostro: {_f(sin_rostro)} %): "
+                  "buena cobertura del canal visual.")
+    elif sin_rostro <= 25:
+        f2.append(f"En el {_f(sin_rostro)} % de los frames no se detectó la cara (al voltear la cabeza o con "
+                  "poca luz). Es aceptable: esos frames no aportan EAR ni MAR, pero no se inventan valores.")
+    else:
+        f2.append(f"En el {_f(sin_rostro)} % de los frames no se detectó la cara: es alto y le quita "
+                  "información al canal visual.")
+        recomendaciones.append("Mejorar la posición y la iluminación de la cámara: más de un 25 % de los "
+                               "frames se pierden sin rostro.")
+    dup = int(q.get("duplicados_eliminados") or 0)
+    if dup == 0:
+        f2.append("No hubo lecturas repetidas.")
+    else:
+        por = {}
+        for r in q.get("duplicados_detalle", []):
+            por[r["fuente"]] = por.get(r["fuente"], 0) + 1
+        fuentes = " y ".join(f"{v} de {'pulso' if k_ == 'pulso' else 'cámara'}" for k_, v in por.items())
+        f2.append(f"Se eliminaron {dup} lecturas repetidas ({fuentes or 'reenvíos'}), un "
+                  f"{_f(100 * dup / max(total, 1), 2)} % del total: no cambia los resultados, pero muestra que "
+                  "el dispositivo a veces reenvía cuando no recibe respuesta a tiempo.")
+    malos = int(q.get("bpm_implausibles") or 0) + int(q.get("valores_inconsistentes") or 0)
+    f2.append("No hay lecturas físicamente imposibles: el sensor de pulso y la medición de la cara "
+              "trabajaron dentro de sus rangos." if malos == 0 else
+              f"Hubo {malos} lecturas físicamente imposibles (pulso fuera de rango o EAR/MAR imposibles), "
+              "señal de fallas puntuales del sensor; se descartaron.")
+    atip = int((q.get("atipicos_eliminados") or {}).get("bpm", 0))
+    lim = (q.get("atipicos_limites") or {}).get("bpm")
+    if atip and lim:
+        f2.append(f"{atip} lecturas de pulso ({_f(100 * atip / max(int(q.get('lecturas_pulso') or 1), 1))} %) "
+                  f"quedaron fuera de {_f(lim[0])}–{_f(lim[1])} BPM y se trataron como ruido del sensor.")
+    gaps, seg = int(q.get("perdidas_comunicacion") or 0), _num(q.get("segundos_sin_comunicacion")) or 0
+    if gaps:
+        f2.append(f"Hubo {gaps} cortes de comunicación de más de 10 s, que suman {_f(seg / 60, 0)} min sin "
+                  "datos. Esos minutos no cuentan como «sin fatiga»: simplemente no hay información.")
+        if seg >= 600:
+            recomendaciones.append(f"Revisar la conexión WiFi de los ESP32: se perdieron {_f(seg / 60, 0)} "
+                                   "min de datos en cortes de comunicación.")
+    out["fase2"] = f2
+
+    # --- Fase 3 ---
+    f3 = []
+    if d.get("disponible"):
+        tot, comp = int(d.get("ventanas_totales") or 0), int(d.get("ventanas_completas") or 0)
+        vtxt = f"{ventana // 60} min" if ventana >= 60 else f"{ventana} s"
+        f3.append(f"Las lecturas se agruparon en {tot} ventanas de {vtxt}; {comp} ({_f(100 * comp / max(tot, 1), 0)} %) "
+                  "tienen las 8 variables y son las que usan los modelos.")
+        if tot and comp / tot < 0.5:
+            f3.append("Muchas ventanas quedan incompletas, casi siempre porque en ese tiempo llegó solo la "
+                      "cámara o solo el pulso: conviene que los dos dispositivos envíen a la vez.")
+        dist = d.get("distribucion_estados") or {}
+        n_dist = sum(dist.values()) or 1
+        if dist:
+            partes = ", ".join(f"{e} {_f(100 * c / n_dist, 0)} %" for e, c in
+                               sorted(dist.items(), key=lambda x: -x[1]))
+            f3.append(f"Estado de las ventanas: {partes}.")
+            alerta = dist.get("alerta", 0) / n_dist
+            if alerta < 0.15:
+                f3.append(f"Las ventanas con alerta son pocas ({_f(alerta * 100, 0)} %): las clases están "
+                          "desbalanceadas, por eso los modelos usan pesos balanceados y se juzgan por recall y "
+                          "F1, no por exactitud.")
+        est = d.get("medias_por_estado") or {}
+        if "normal" in est and "alerta" in est:
+            nrm, alr = est["normal"], est["alerta"]
+            esperado = {"ear_mean": -1, "perclos": 1, "bpm_drop_pct": 1}
+            frases, coinciden = [], 0
+            for var, signo in esperado.items():
+                a, b = _num(alr.get(var)), _num(nrm.get(var))
+                if a is None or b is None:
+                    continue
+                frases.append(f"{L[var]} {_f(a, 2 if var == 'ear_mean' else 1)} frente a "
+                              f"{_f(b, 2 if var == 'ear_mean' else 1)}")
+                coinciden += (a - b) * signo > 0
+            if frases:
+                f3.append("En las ventanas con alerta comparadas con las normales: " + "; ".join(frases) + ". " +
+                          ("Las diferencias van en la dirección esperada (ojos más cerrados y pulso más bajo): "
+                           "las variables sí distinguen la fatiga." if coinciden == len(frases) else
+                           "No todas van en la dirección esperada: revisar los umbrales con más datos."))
+        corr = d.get("correlacion")
+        if corr:
+            vs, M = corr["variables"], corr["matriz"]
+            # La caída del BPM se calcula a partir del BPM medio: su correlación es por construcción
+            derivado = {frozenset(("bpm_mean", "bpm_drop_pct"))}
+            pares = [(vs[i], vs[j], M[i][j]) for i in range(len(vs)) for j in range(i + 1, len(vs))
+                     if _num(M[i][j]) is not None and frozenset((vs[i], vs[j])) not in derivado]
+            if pares:
+                a, b, r = max(pares, key=lambda p: abs(p[2]))
+                f3.append(f"La correlación más alta es entre {L[a]} y {L[b]} (r = {_f(r, 2)}, {_fuerza_r(r)}): "
+                          + ("se mueven juntas, así que en parte miden lo mismo." if r > 0 else
+                             "cuando una sube la otra baja, lo esperable si miden el mismo fenómeno desde lados opuestos."))
+                cam = {"ear_mean", "perclos", "mar_max", "yawn_count", "tilt_abs_mean"}
+                cruz = [p for p in pares if (p[0] in cam) != (p[1] in cam)]
+                if cruz:
+                    rc = max(abs(p[2]) for p in cruz)
+                    f3.append(f"Entre las variables de cámara y las de pulso la correlación máxima es {_f(rc, 2)} "
+                              f"({_fuerza_r(rc)}): " + ("las dos fuentes aportan información distinta, lo que "
+                              "justifica fusionarlas." if rc < 0.4 else "las dos fuentes están relacionadas."))
+        hora = {int(h): v for h, v in (d.get("eventos_por_hora") or {}).items()}
+        if hora:
+            h, v = max(hora.items(), key=lambda x: x[1])
+            f3.append(f"La hora con más episodios de fatiga es las {h}:00 ({v} de {sum(hora.values())}). "
+                      "Depende de a qué hora se hicieron las pruebas, así que no indica por sí sola una hora de riesgo.")
+        if (q.get("sesiones") or 0) > 1:
+            f3.append("La serie temporal junta todas las sesiones en orden de fecha: los saltos bruscos suelen "
+                      "ser el paso de una prueba a otra, no un cambio del conductor.")
+    out["fase3"] = f3
+
+    # --- Fase 4a: K-Means ---
+    if cl.get("disponible"):
+        sil = _num(cl.get("silueta")) or 0
+        cal = "fuerte" if sil >= 0.5 else "moderada" if sil >= 0.25 else "débil"
+        f = [f"K-Means encontró {cl['k']} grupos con una silueta de {_f(sil, 2)} (separación {cal}"
+             + (": los grupos se solapan bastante)." if cal == "débil" else ").")]
+        grupos = cl.get("grupos") or []
+        if grupos:
+            f.append("Tamaño de los grupos: " + ", ".join(f"{g['nombre']} {_f(g['porcentaje'], 0)} %" for g in grupos) + ".")
+            a, z = grupos[0]["centroide"], grupos[-1]["centroide"]
+            f.append(f"El grupo «{grupos[-1]['nombre']}» tiene EAR medio {_f(z.get('ear_mean'), 2)} y PERCLOS "
+                     f"{_f(z.get('perclos'))} %, frente a {_f(a.get('ear_mean'), 2)} y {_f(a.get('perclos'))} % del "
+                     f"grupo «{grupos[0]['nombre']}»; caída del pulso {_f(z.get('bpm_drop_pct'))} % frente a "
+                     f"{_f(a.get('bpm_drop_pct'))} %.")
+        ari = _num(cl.get("ari_vs_fusion")) or 0
+        f.append(f"Coincidencia con los estados de la fusión (ARI = {_f(ari, 2)}): " +
+                 ("alta, los datos se agrupan solos igual que deciden las reglas." if ari >= 0.5 else
+                  "parcial, los grupos naturales se parecen solo en parte a lo que deciden las reglas." if ari >= 0.2 else
+                  "baja, los grupos naturales no siguen los estados de las reglas; agrupan sobre todo por otras "
+                  "diferencias (por ejemplo, entre personas)."))
+        out["fase4a"] = f
+
+    # --- Fase 4b: árbol ---
+    if k.get("disponible"):
+        m = k["metricas"]
+        f = [f"El árbol detecta el {_pct(m['recall'], 0)} de las ventanas con fatiga (recall) y acierta en el "
+             f"{_pct(m['precision'], 0)} de sus alertas (precisión), con F1 = {_f(m['f1'], 2)}."]
+        base = _num(m.get("exactitud_clasificador_base"))
+        if base is not None:
+            f.append(f"Su exactitud es {_pct(m['exactitud'], 0)} frente a {_pct(base, 0)} de un modelo que siempre "
+                     "dice la clase más común" + (": aporta sobre adivinar." if m["exactitud"] > base else
+                                                  ": no mejora sobre adivinar."))
+        imp = [r for r in k.get("importancia_variables", []) if (_num(r["importancia"]) or 0) > 0]
+        if imp:
+            f.append("Las variables que más pesan en sus decisiones son " +
+                     ", ".join(f"{r['variable']} ({_pct(r['importancia'], 0)})" for r in imp[:3]) + ".")
+        comp = k.get("comparacion_modelos") or []
+        if comp:
+            f.append(f"En validación cruzada el mejor modelo es {comp[0]['modelo']} (F1 medio "
+                     f"{_f(comp[0]['f1_medio'], 2)} ± {_f(comp[0]['f1_desv'], 2)}).")
+        if k.get("advertencia"):
+            f.append("Como la etiqueta sale de las reglas de la fusión, estos resultados muestran qué variables "
+                     "usan esas reglas, no si detectan la somnolencia real.")
+        out["fase4b"] = f
+
+    # --- Fase 4c: anomalías ---
+    if an.get("disponible"):
+        na, nv = int(an.get("anomalias_detectadas") or 0), int(an.get("ventanas_analizadas") or 0)
+        f = [f"Isolation Forest marcó {na} de {nv} ventanas ({_f(100 * na / max(nv, 1), 0)} %) como inusuales."]
+        lst = an.get("anomalias") or []
+        if lst:
+            cuenta = pd.Series([r["variable_mas_atipica"] for r in lst]).value_counts()
+            f.append(f"La variable que más se aleja de lo normal en ellas suele ser {cuenta.index[0]} "
+                     f"({cuenta.iloc[0]} de {len(lst)}).")
+            en_alerta = sum(1 for r in lst if r.get("estado_fusion") == "alerta")
+            f.append(f"{en_alerta} de esas ventanas estaban en alerta: " +
+                     ("muchas anomalías coinciden con fatiga detectada." if en_alerta >= len(lst) / 2 else
+                      "la mayoría no son fatiga, sino momentos raros (movimiento, mala lectura del sensor o "
+                      "cambio de condiciones) que conviene revisar."))
+        out["fase4c"] = f
+
+    # --- Fase 4d: regresión ---
+    if rg.get("disponible"):
+        f = []
+        if rg.get("modelo_elegido") == "lineal":
+            lm = rg["lineal"]["metricas"]
+            f.append(f"La regresión lineal explica el {_pct(lm['r2'], 0)} de la variación del KSS (R²) y se "
+                     f"equivoca en promedio {_f(lm['mae'], 2)} puntos de la escala, frente a "
+                     f"{_f(lm['mae_modelo_base'], 2)} de un modelo que siempre predice el promedio.")
+            co = rg["lineal"]["coeficientes"][:2]
+            f.append("Lo que más mueve el KSS estimado: " + "; ".join(
+                f"{c['variable']} ({'+' if c['coeficiente'] > 0 else '−'}{_f(abs(c['coeficiente']), 2)} puntos por "
+                "cada desviación estándar)" for c in co) + ".")
+        else:
+            lg = rg["logistica"]
+            auc = _num(lg["metricas"].get("auc"))
+            if auc is not None:
+                cal = ("excelente" if auc >= 0.9 else "buena" if auc >= 0.8 else
+                       "aceptable" if auc >= 0.7 else "débil")
+                f.append(f"La regresión logística separa ventanas con y sin fatiga con un AUC de {_f(auc, 2)} "
+                         f"({cal}; 0,5 sería adivinar al azar).")
+            for c in lg.get("coeficientes", [])[:2]:
+                o = _num(c.get("odds_ratio")) or 1
+                f.append(f"Por cada desviación estándar más de {c['variable']}, las probabilidades de fatiga se "
+                         + (f"multiplican por {_f(o, 2)}." if o >= 1 else f"reducen a {_f(o, 2)} veces (bajan)."))
+        out["fase4d"] = f
+
+    # --- Fase 6: recomendaciones derivadas de los resultados ---
+    if k.get("disponible") and k.get("importancia_variables"):
+        top = k["importancia_variables"][0]["variable"]
+        recomendaciones.append(f"Calibrar con prioridad el umbral relacionado con {top}, que es la variable "
+                               "que más decide en el modelo.")
+    if ev.get("disponible") and not any(r["cumple"] for r in ev.get("modelos", [])):
+        recomendaciones.append("Los modelos aún no cumplen los criterios de éxito: no reemplazar las reglas "
+                               "de fusión hasta tener más datos.")
+    out["fase6"] = recomendaciones or ["Los resultados no muestran problemas pendientes: mantener la recolección "
+                                       "para confirmar los resultados con más personas y sesiones."]
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Reporte completo
 # ---------------------------------------------------------------------------
 
@@ -1047,6 +1349,7 @@ def full_report(session_id: str, ventana_s: int = VENTANA_DEFECTO_S) -> dict:
         "anomalias": anomalies(w),
     }
     report["evaluacion"] = evaluate_criteria(report["clasificacion"], report["regresion"])
+    report["interpretacion"] = interpret(report)
     return _clean(report)
 
 

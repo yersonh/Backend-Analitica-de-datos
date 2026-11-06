@@ -668,6 +668,11 @@
         .analytics .fatiga-sube { color: #b4354f; font-weight: 600; white-space: nowrap; }
         .analytics .fatiga-baja { color: #1d6fa5; font-weight: 600; white-space: nowrap; }
         .analytics details.dict-more { margin-top: 10px; }
+        /* Interpretación de cada fase */
+        .analytics .interp { margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: rgba(108, 111, 214, 0.07); border: 1px solid rgba(108, 111, 214, 0.28); }
+        .analytics .interp h3 { margin: 0 0 8px; font-size: 0.9rem; }
+        .analytics .interp ul { margin: 0; padding-left: 18px; }
+        .analytics .interp li { margin: 4px 0; font-size: 0.86rem; line-height: 1.5; }
         .analytics details.dict-more summary { cursor: pointer; font-weight: 600; font-size: 0.86rem; }
         .analytics tbody tr { border-top: 1px solid var(--line); transition: background .2s; }
         .analytics tbody tr:hover { background: rgba(108, 111, 214,.06); }
@@ -1966,6 +1971,10 @@
                     <div class="kpi"><div class="label">Pérdidas de comunicación</div><div class="value">${n(q.perdidas_comunicacion, 0)}</div><div class="hint">${n(q.segundos_sin_comunicacion, 0)} s sin lecturas (huecos &gt; 10 s)</div></div>
                     <div class="kpi"><div class="label">Sesiones / personas</div><div class="value">${n(q.sesiones, 0)} / ${n(q.personas, 0)}</div><div class="hint">persona = texto antes de "_"</div></div>
                 </div>
+                ${(q.duplicados_detalle || []).length ? `<details class="dict-more"><summary>Ver las ${q.duplicados_detalle.length} lecturas repetidas que se eliminaron</summary>
+                <div class="table-wrap"><table class="dict"><thead><tr><th>Sesión</th><th>Fuente</th><th>Hora</th><th>Valores repetidos</th><th>Segundos tras la original</th></tr></thead><tbody>` +
+                q.duplicados_detalle.map(r => `<tr><td>${esc(r.session_id)}</td><td>${r.fuente === "pulso" ? "Pulso" : "Cámara"}</td><td>${esc(String(r.hora).replace("T", " "))}</td><td>${Object.entries(r.valores || {}).map(([k, v]) => `${esc(k)} = ${n(v, 3)}`).join(" · ")}</td><td>${n(r.segundos_tras_original, 3)}</td></tr>`).join("") +
+                `</tbody></table></div></details>` : ""}
             </section>`;
         }
 
@@ -2023,7 +2032,9 @@
 
         function chartsDescriptive(d) {
             const s = d.serie_temporal || [];
-            const labels = s.map(r => (r.timestamp || "").slice(11, 19));
+            // Con varios días el eje lleva la fecha: si no, las horas parecen desordenadas
+            const variosDias = s.length && (s[0].timestamp || "").slice(0, 10) !== (s[s.length - 1].timestamp || "").slice(0, 10);
+            const labels = s.map(r => { const t = r.timestamp || ""; return variosDias ? `${t.slice(8, 10)}/${t.slice(5, 7)} ${t.slice(11, 16)}` : t.slice(11, 19); });
             chart("ch-serie", {
                 type: "line",
                 data: { labels, datasets: [
@@ -2238,6 +2249,14 @@
         }
 
         // Los modelos sin datos no se dibujan: esta tarjeta dice qué les falta
+        // Recuadro "Interpretación" al final de la sección (antes de su último </section>)
+        function withInterp(html, lines) {
+            if (!html || !(lines || []).length) return html;
+            const box = `<div class="interp"><h3>Interpretación</h3><ul>${lines.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>`;
+            const k = html.lastIndexOf("</section>");
+            return k < 0 ? html + box : html.slice(0, k) + box + html.slice(k);
+        }
+
         // ---------- CRISP-DM: fases 1, 5 y 6 ----------
         function renderBusiness(params) {
             const c = (params && params.criterios_exito) || {};
@@ -2266,11 +2285,13 @@
             </section>`;
         }
 
-        function renderDeployment() {
+        function renderDeployment(recs) {
+            const lista = (recs || []).length ? `<div class="interp"><h3>Recomendaciones a partir de los resultados</h3><ul>${recs.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>` : "";
             return `
             <section class="an-panel glass" id="despliegue">
                 <h2>Fase 6 · Despliegue</h2>
                 <p class="lead">El conocimiento obtenido se usa en tiempo real: el motor de fusión (<code>fusion.py</code>) solo da alerta cuando la cámara y el pulso muestran fatiga a la vez, el ESP32 hace sonar el buzzer, y el supervisor sigue a cada conductor en este panel web y en la app móvil. Los datos y el dataset preparado se pueden exportar en CSV para nuevas iteraciones del proceso.</p>
+                ${lista}
             </section>`;
         }
 
@@ -2331,10 +2352,14 @@
                     box.innerHTML = `<section class="an-panel glass"><div class="empty">${esc(r.mensaje)}<br><br>Deja los ESP32 enviando datos unos minutos y presiona <b>Recalcular</b>.</div></section>`;
                     return;
                 }
-                box.innerHTML = renderBusiness(r.parametros) + renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
-                    renderCluster(r.clustering, r.parametros) + renderClassify(r.clasificacion) +
-                    renderAnomalies(r.anomalias, r.parametros) + renderRegression(r.regresion || { disponible: false, mensaje: "" }) +
-                    renderEvaluation(r.evaluacion) + renderDeployment() + renderPending(r);
+                const I = r.interpretacion || {};
+                const wi = (html, fase) => withInterp(html, I[fase]);
+                box.innerHTML = wi(renderBusiness(r.parametros), "fase1") + wi(renderQuality(r.calidad_datos), "fase2") +
+                    wi(renderDescriptive(r.descriptiva, r.parametros), "fase3") +
+                    wi(renderCluster(r.clustering, r.parametros), "fase4a") + wi(renderClassify(r.clasificacion), "fase4b") +
+                    wi(renderAnomalies(r.anomalias, r.parametros), "fase4c") +
+                    wi(renderRegression(r.regresion || { disponible: false, mensaje: "" }), "fase4d") +
+                    renderEvaluation(r.evaluacion) + renderDeployment(I.fase6) + renderPending(r);
                 chartsDescriptive(r.descriptiva);
                 chartsCluster(r.clustering);
                 chartsClassify(r.clasificacion);

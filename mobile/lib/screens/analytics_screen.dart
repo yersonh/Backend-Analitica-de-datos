@@ -250,21 +250,27 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       for (final m in modelos.entries)
         if (!ok(m.key) && _map(r[m.key])['mensaje'] != null) (m.value, '${_map(r[m.key])['mensaje']}'),
     ];
+    // Interpretación de cada fase (la genera el servidor: analytics.interpret)
+    final interp = _map(r['interpretacion']);
+    Widget i(String fase) => _InterpretationCard(lines: [for (final t in _list(interp[fase])) '$t']);
     return [
       _BusinessSection(criterios: _map(params['criterios_exito'])),
+      i('fase1'),
       _QualitySection(q: _map(r['calidad_datos'])),
+      i('fase2'),
       _DescriptiveSection(
         d: _map(r['descriptiva']),
         labels: labels,
         ventana: (params['ventana_s'] as num?)?.toInt() ?? _ventana,
         diccionario: _map(params['diccionario']),
       ),
-      if (ok('clustering')) _ClusterSection(c: _map(r['clustering']), labels: labels),
-      if (ok('clasificacion')) _ClassifySection(k: _map(r['clasificacion'])),
-      if (ok('anomalias')) _AnomaliesSection(a: _map(r['anomalias']), labels: labels),
-      if (ok('regresion')) RegressionSection(g: _map(r['regresion'])),
+      i('fase3'),
+      if (ok('clustering')) ...[_ClusterSection(c: _map(r['clustering']), labels: labels), i('fase4a')],
+      if (ok('clasificacion')) ...[_ClassifySection(k: _map(r['clasificacion'])), i('fase4b')],
+      if (ok('anomalias')) ...[_AnomaliesSection(a: _map(r['anomalias']), labels: labels), i('fase4c')],
+      if (ok('regresion')) ...[RegressionSection(g: _map(r['regresion'])), i('fase4d')],
       if (ok('evaluacion')) _EvaluationSection(ev: _map(r['evaluacion'])),
-      const _DeploymentSection(),
+      _DeploymentSection(recomendaciones: [for (final t in _list(interp['fase6'])) '$t']),
       if (pendientes.isNotEmpty) _PendingSection(modelos: pendientes),
     ];
   }
@@ -591,21 +597,68 @@ class _EvaluationSection extends StatelessWidget {
 }
 
 class _DeploymentSection extends StatelessWidget {
-  const _DeploymentSection();
+  const _DeploymentSection({required this.recomendaciones});
+  final List<String> recomendaciones;
 
   @override
   Widget build(BuildContext context) {
-    return const GlassCard(
+    return GlassCard(
       title: 'Fase 6 · Despliegue',
       icon: Icons.rocket_launch_outlined,
-      child: Note(
-        'El conocimiento obtenido se usa en tiempo real: el motor de fusión (fusion.py) solo da alerta cuando la '
-        'cámara y el pulso muestran fatiga a la vez, el ESP32 hace sonar el buzzer, y el supervisor sigue a cada '
-        'conductor en el panel web y en esta app. Los datos y el dataset preparado se pueden exportar en CSV para '
-        'nuevas iteraciones del proceso.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Note(
+            'El conocimiento obtenido se usa en tiempo real: el motor de fusión (fusion.py) solo da alerta cuando la '
+            'cámara y el pulso muestran fatiga a la vez, el ESP32 hace sonar el buzzer, y el supervisor sigue a cada '
+            'conductor en el panel web y en esta app. Los datos y el dataset preparado se pueden exportar en CSV para '
+            'nuevas iteraciones del proceso.',
+          ),
+          if (recomendaciones.isNotEmpty) ...[
+            const SubTitle('Recomendaciones a partir de los resultados'),
+            for (final t in recomendaciones) _Bullet(t),
+          ],
+        ],
       ),
     );
   }
+}
+
+/// Recuadro "Interpretación" debajo de cada fase (mismo texto que el panel web).
+class _InterpretationCard extends StatelessWidget {
+  const _InterpretationCard({required this.lines});
+  final List<String> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return GlassCard(
+      title: 'Interpretación',
+      icon: Icons.lightbulb_outline,
+      accent: C.cyan,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [for (final t in lines) _Bullet(t)],
+      ),
+    );
+  }
+}
+
+class _Bullet extends StatelessWidget {
+  const _Bullet(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('•  ', style: TextStyle(color: C.cyan, fontWeight: FontWeight.w700)),
+        Expanded(child: Text(text, style: const TextStyle(color: C.text, fontSize: 13, height: 1.45))),
+      ],
+    ),
+  );
 }
 
 class _QualitySection extends StatelessWidget {
@@ -670,6 +723,29 @@ class _QualitySection extends StatelessWidget {
               ),
             ],
           ),
+          if (_list(q['duplicados_detalle']).isNotEmpty)
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              expandedAlignment: Alignment.centerLeft,
+              expandedCrossAxisAlignment: CrossAxisAlignment.start,
+              title: Text(
+                'Ver las ${_list(q['duplicados_detalle']).length} lecturas repetidas que se eliminaron',
+                style: const TextStyle(fontWeight: FontWeight.w600, color: C.text, fontSize: 13.5),
+              ),
+              children: [
+                for (final d in _list(q['duplicados_detalle']).map(_map))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      '${d['session_id']} · ${d['fuente'] == 'pulso' ? 'Pulso' : 'Cámara'} · '
+                      '${'${d['hora']}'.replaceAll('T', ' ')}\n'
+                      '${_map(d['valores']).entries.map((e) => '${e.key} = ${n(e.value, 3)}').join(' · ')} '
+                      '(${n(d['segundos_tras_original'], 3)} s tras la original)',
+                      style: const TextStyle(color: C.text, fontSize: 12.5, height: 1.4),
+                    ),
+                  ),
+              ],
+            ),
         ],
       ),
     );
@@ -770,7 +846,15 @@ class _DescriptiveSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final serie = _list(d['serie_temporal']).map(_map).toList();
-    final xLabels = [for (final r in serie) ((r['timestamp'] as String?) ?? '').padRight(19).substring(11, 19)];
+    // Con varios días el eje lleva la fecha: si no, las horas parecen desordenadas
+    String ts(Map<String, dynamic> r) => ((r['timestamp'] as String?) ?? '').padRight(19);
+    final variosDias = serie.isNotEmpty && ts(serie.first).substring(0, 10) != ts(serie.last).substring(0, 10);
+    final xLabels = [
+      for (final r in serie)
+        variosDias
+            ? '${ts(r).substring(8, 10)}/${ts(r).substring(5, 7)} ${ts(r).substring(11, 16)}'
+            : ts(r).substring(11, 19),
+    ];
     final dist = _map(d['distribucion_estados']);
     final dia = _map(d['eventos_por_dia']);
     final hora = _map(d['eventos_por_hora']);
