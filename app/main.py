@@ -304,18 +304,21 @@ def _minute_summary(session_id: str) -> dict:
     cached = _minutes_cache.get(session_id)
     if cached and time.time() - cached[0] < MINUTES_CACHE_SECONDS:
         return cached[1]
-    summary = database.minute_summary(session_id)
+    summary = database.minute_summary(None if session_id == analytics.TODAS else session_id)
     _minutes_cache[session_id] = (time.time(), summary)
     return summary
 
 
 @app.get("/eventos")
 def get_events(session_id: str | None = None, limit: int = 200, user: User = Depends(require("panel"))):
-    """Historial de eventos de fatiga (RF07, RF09)."""
+    """Historial de eventos de fatiga (RF07, RF09).
+    session_id="todas" (solo supervisor/administrador) junta todas las sesiones."""
     session_id = auth.resolve_session(user, session_id) or DEFAULT_SESSION_ID
+    filtro = None if session_id == analytics.TODAS else session_id
     return {
-        "events": database.list_events(session_id=session_id, limit=limit),
-        "counts_by_risk": database.event_counts_by_risk(session_id=session_id),
+        "events": database.list_events(session_id=filtro, limit=limit),
+        "counts_by_risk": database.event_counts_by_risk(session_id=filtro),
+        "normal_count": database.normal_reading_count(session_id=filtro),
         # minutos recientes ya resumidos: "normales" y "vigilancias" (máximo 20 de cada uno)
         **_minute_summary(session_id),
     }
@@ -551,14 +554,15 @@ def dashboard(request: Request, session_id: str | None = None, user: User = Depe
     lecturas más recientemente (así el enlace de Railway abre directo la prueba
     en curso). Un conductor siempre ve su propia sesión."""
     session_id = auth.resolve_session(user, session_id)
-    if session_id == analytics.TODAS and not user.can("analitica"):
+    if session_id == analytics.TODAS and not user.can("todas_sesiones"):
         raise auth.Forbidden()
     if not session_id:
         sesiones = database.list_sessions()
         session_id = sesiones[0]["session_id"] if sesiones else DEFAULT_SESSION_ID
-    events = database.list_events(session_id=session_id, limit=100)
-    counts = database.event_counts_by_risk(session_id=session_id)
-    normal_count = database.normal_reading_count(session_id=session_id)
+    filtro = None if session_id == analytics.TODAS else session_id
+    events = database.list_events(session_id=filtro, limit=100)
+    counts = database.event_counts_by_risk(session_id=filtro)
+    normal_count = database.normal_reading_count(session_id=filtro)
     current_status = fusion_engine.get_current_status(session_id)
     return templates.TemplateResponse(
         request,

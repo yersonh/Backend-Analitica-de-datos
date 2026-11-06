@@ -499,35 +499,40 @@ def list_sessions() -> list[dict]:
     return rows
 
 
-def minute_summary(session_id: str, limit: int = 20, hours: int = 24) -> dict:
+def minute_summary(session_id: str | None, limit: int = 20, hours: int = 24) -> dict:
     """Minutos recientes sin episodio guardado, uno por fila, con el EAR y el BPM
     medios. Resume las lecturas para el historial sin mandar cada frame (serían
     miles por hora). Un minuto con alguna lectura en vigilancia NO es normal:
     va aparte, para que un cabeceo sin confirmar por el pulso no salga en verde.
     Devuelve {"normales": [...], "vigilancias": [...]}, cada lista con máximo
-    `limit` filas. Los minutos con alerta o advertencia de sensor se omiten."""
+    `limit` filas. Los minutos con alerta o advertencia de sensor se omiten.
+    Con session_id=None se resumen todas las sesiones: un minuto por sesión,
+    con su session_id, para no mezclar lecturas de conductores distintos."""
     minute = ("to_char(timestamp, 'YYYY-MM-DD\"T\"HH24:MI')" if USE_POSTGRES
               else "substr(timestamp, 1, 16)")
     since = datetime.now() - timedelta(hours=hours)
     since = since if USE_POSTGRES else since.isoformat(timespec="seconds")
+    where = "session_id = ? AND timestamp >= ?" if session_id else "timestamp >= ?"
+    params = (session_id, since) if session_id else (since,)
     sql = f"""
-        SELECT {minute} AS minuto, COUNT(*) AS lecturas,
+        SELECT session_id, {minute} AS minuto, COUNT(*) AS lecturas,
                AVG(CASE WHEN source = 'frame' AND face_detected = 1 THEN ear END) AS ear,
                AVG(CASE WHEN source = 'pulso' THEN bpm END) AS bpm,
                SUM(CASE WHEN fusion_status = 'vigilancia' THEN 1 ELSE 0 END) AS en_vigilancia
         FROM sensor_readings
-        WHERE session_id = ? AND timestamp >= ?
-        GROUP BY {minute}
+        WHERE {where}
+        GROUP BY session_id, {minute}
         HAVING SUM(CASE WHEN fusion_status IN ('alerta', 'advertencia_sensor') THEN 1 ELSE 0 END) = 0
         ORDER BY minuto DESC
     """
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(_ph(sql), (session_id, since))
+        cur.execute(_ph(sql), params)
         rows = [dict(r) for r in cur.fetchall()]
 
     def fila(r: dict) -> dict:
         return {
+            "session_id": r["session_id"],
             "timestamp": r["minuto"],
             "lecturas": int(r["lecturas"]),
             "ear": round(float(r["ear"]), 3) if r["ear"] is not None else None,

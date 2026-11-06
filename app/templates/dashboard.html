@@ -346,6 +346,10 @@
         .scanner.local .live-cam video, .scanner.local .live-cam canvas { display: block; }
         .scanner.local .live-cam img { display: none; }
         .cam-source select { border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+        #top-session { max-width: 220px; }
+        /* "Todas las sesiones": lo que es de un solo conductor en vivo no aplica */
+        body.all-sessions .live-only { display: none; }
+        .tag.who { color: var(--ink); font-weight: 600; }
         .cam-badge { position: absolute; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: 6px;
             padding: 4px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em;
             color: #fff; background: rgba(224, 96, 126, 0.9); }
@@ -692,7 +696,7 @@
     </style>
     {% if "analitica" in perms or "analitica_propia" in perms %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>{% endif %}
 </head>
-<body>
+<body{% if session_id == "todas" %} class="all-sessions"{% endif %}>
     <!-- ===== Fondo ===== -->
     <div class="bg" aria-hidden="true">
         <div class="bg-img" id="bg-img"></div>
@@ -739,7 +743,12 @@
             </div>
             <div class="grow"></div>
             {% if "analitica" in perms or "analitica_propia" in perms %}<a class="chip chip-btn" href="#analitica" style="text-decoration:none">Analítica de datos ↓</a>{% endif %}
-            <span class="chip">Sesión <b>{{ session_id }}</b></span>
+            {% if "todas_sesiones" in perms %}<label class="chip cam-source">Sesión
+                <select id="top-session" aria-label="Sesión que muestra el panel">
+                    <option value="todas" {% if session_id == "todas" %}selected{% endif %}>Todas las sesiones</option>
+                    {% if session_id != "todas" %}<option value="{{ session_id }}" selected>{{ session_id }}</option>{% endif %}
+                </select>
+            </label>{% else %}<span class="chip">Sesión <b>{{ session_id }}</b></span>{% endif %}
             {% if user.session_id and session_id == user.session_id %}<label class="chip cam-source">Cámara
                 <select id="cam-source" aria-label="Cámara que envía las imágenes">
                     <option value="esp32">ESP32-CAM</option>
@@ -788,7 +797,7 @@
             {% endif %}
 
             <!-- ===== Hero ===== -->
-            <section class="glass hero span-8 reveal" id="hero" aria-live="polite">
+            <section class="glass hero span-8 reveal live-only" id="hero" aria-live="polite">
                 <div class="hero-glow"></div>
                 <div>
                     <div class="eyebrow"><i></i>Estado del conductor</div>
@@ -853,7 +862,7 @@
             </section>
 
             <!-- ===== Pulso ===== -->
-            <section class="glass pad pulse-card span-4 reveal">
+            <section class="glass pad pulse-card span-4 reveal live-only">
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
                     Ritmo cardíaco
@@ -883,7 +892,7 @@
                 {% if "todas_sesiones" in perms %}<button type="button" class="wake-btn" id="buzzer-btn">Despertar</button>{% endif %}
             </section>
 
-            <section class="glass pad fusion span-7 reveal">
+            <section class="glass pad fusion span-7 reveal live-only">
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="12" r="2"/><path d="M7 6c6 0 6 6 10 6M7 18c6 0 6-6 10-6"/></svg>
                     Motor de fusión multimodal
@@ -929,7 +938,7 @@
             </section>
 
             <!-- ===== Medidores ===== -->
-            <section class="glass pad span-5 reveal">
+            <section class="glass pad span-5 reveal live-only">
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
                     Indicadores frente a umbral
@@ -938,7 +947,7 @@
             </section>
 
             <!-- ===== Tendencias ===== -->
-            <section class="glass pad span-7 reveal">
+            <section class="glass pad span-7 reveal live-only">
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 17l6-6 4 4 8-8"/></svg>
                     Apertura ocular (EAR) en vivo
@@ -947,7 +956,7 @@
                 </div>
                 <div class="trend" id="trend-ear"></div>
             </section>
-            <section class="glass pad span-5 reveal">
+            <section class="glass pad span-5 reveal live-only">
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
                     BPM en vivo
@@ -1071,6 +1080,10 @@
         const THR = {{ thresholds | tojson }};
         const MESH = {{ mesh_contours | tojson }};
         const CAN_FLEET = {{ ("todas_sesiones" in perms) | tojson }};
+        const ALL = SESSION === "todas";   // historial de todas las sesiones juntas
+        // nombre del conductor de cada sesión (lo llena la flota) para el historial
+        const WHO = {};
+        const whoTag = (e) => ALL && e.session_id ? `<span class="tag who">${esc(WHO[e.session_id] || e.session_id)}</span>` : "";
         const INITIAL_EVENTS = {{ events | tojson }};
         const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
         const $ = (id) => document.getElementById(id);
@@ -1499,7 +1512,7 @@
             const all = [...events, ...minutes].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
             const list = all.filter(e => filter === "all" || e.risk_level === filter);
             if (!list.length) {
-                $("timeline").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><p>${all.length ? "No hay nada con este filtro en las últimas 24 h." : "Aún no se han registrado lecturas de esta sesión."}</p></div>`;
+                $("timeline").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><p>${all.length ? "No hay nada con este filtro en las últimas 24 h." : (ALL ? "Aún no se han registrado lecturas en ninguna sesión." : "Aún no se han registrado lecturas de esta sesión.")}</p></div>`;
                 return;
             }
             $("timeline").innerHTML = list.map((e, i) => {
@@ -1511,7 +1524,7 @@
                     <div class="ico">${e.risk_level === "normal" ? OK_ICON : ICONS.medio}</div>
                     <div>
                         <div class="title"><span class="badge">${esc(r.label)}</span></div>
-                        <div class="tags">
+                        <div class="tags">${whoTag(e)}
                             <span class="tag">BPM ${e.bpm != null ? Math.round(e.bpm) : "—"}</span>
                             <span class="tag">EAR ${e.ear != null ? Number(e.ear).toFixed(3) : "—"}</span>
                         </div>
@@ -1524,7 +1537,7 @@
                     <div>
                         <div class="title"><span class="badge">${esc(r.label)}</span>${esc8 ? '<span class="badge" style="--c:var(--rojo)">↑ escalada</span>' : ""}</div>
                         <div class="detail">${esc(e.detail)}</div>
-                        <div class="tags">
+                        <div class="tags">${whoTag(e)}
                             <span class="tag ${e.visual_signal ? "on" : ""}">visual ${e.visual_signal ? "✓" : "—"}</span>
                             <span class="tag ${e.physiological_signal ? "on" : ""}">fisiológica ${e.physiological_signal ? "✓" : "—"}</span>
                             <span class="tag">BPM ${e.bpm ?? "—"}</span>
@@ -1614,7 +1627,8 @@
             if (maxId !== null) next.forEach(e => { if (e.id > maxId) fresh.add(e.id); });
             if (next.length) maxId = Math.max(maxId ?? 0, ...next.map(e => e.id));
             else if (maxId === null) maxId = 0;
-            [...next].reverse().filter(e => fresh.has(e.id)).slice(-3).forEach(toast);
+            [...next].reverse().filter(e => fresh.has(e.id)).slice(-3)
+                .forEach(e => toast(ALL ? { ...e, _quien: WHO[e.session_id] || e.session_id } : e));
             const nextMinutes = [
                 ...(data.vigilancias || []).map(m => ({ ...m, risk_level: "vigilancia", minuto: true })),
                 ...(data.normales || []).map(m => ({ ...m, risk_level: "normal", minuto: true })),
@@ -1624,6 +1638,7 @@
             events = next;
             minutes = nextMinutes;
             if (changed) renderTimeline(fresh);
+            if (data.normal_count != null) countTo($("k-normal"), data.normal_count);
             countTo($("k-alto"), counts.alto || 0);
             countTo($("k-medio"), counts.medio || 0);
             countTo($("k-sensor"), counts.advertencia_sensor || 0);
@@ -1790,11 +1805,12 @@
                 const ids = {}, estados = {}, now = Date.now();
                 drivers.forEach(d => {
                     const sid = d.session_id, quien = d.conductor || sid, ev = d.ultimo_evento;
+                    if (d.conductor) WHO[sid] = d.conductor;
                     estados[sid] = d.estado;
                     if (ev) {
                         ids[sid] = ev.id;
                         // los episodios de la sesión abierta ya los avisa applyEvents
-                        if (lastIds && sid !== SESSION && !(lastIds[sid] >= ev.id)) toast({ ...ev, _quien: quien });
+                        if (lastIds && !ALL && sid !== SESSION && !(lastIds[sid] >= ev.id)) toast({ ...ev, _quien: quien });
                     }
                     if (!lastEstados || d.estado !== "vigilancia") return;
                     const antes = lastEstados[sid] || "";
@@ -1844,8 +1860,23 @@
 
         renderTimeline();
         if (INITIAL_EVENTS.length) maxId = Math.max(...INITIAL_EVENTS.map(e => e.id));
-        pollStatus(); pollEvents();
-        setInterval(pollStatus, 1500);
+        // Selector de sesión de la barra superior (supervisor / administrador)
+        const topSel = $("top-session");
+        if (topSel) {
+            topSel.addEventListener("change", () => { location.search = "?session_id=" + encodeURIComponent(topSel.value); });
+            fetch("/sesiones").then(r => r.json()).then(r => {
+                const list = r.sesiones || [];
+                if (!ALL && !list.some(s => s.session_id === SESSION)) list.unshift({ session_id: SESSION, lecturas: 0 });
+                const total = list.reduce((a, s) => a + (s.lecturas || 0), 0);
+                topSel.innerHTML = `<option value="todas" ${ALL ? "selected" : ""}>Todas las sesiones (${total})</option>` +
+                    list.map(s => `<option value="${esc(s.session_id)}" ${s.session_id === SESSION ? "selected" : ""}>${esc(s.session_id)} (${s.lecturas})</option>`).join("");
+            }).catch(e => console.error("No se pudieron cargar las sesiones", e));
+        }
+
+        // Con "Todas las sesiones" no hay un conductor en vivo: solo historial y conteos
+        if (ALL) { $("live").classList.remove("stale"); $("live-text").textContent = "Todas las sesiones"; }
+        else { pollStatus(); setInterval(pollStatus, 1500); }
+        pollEvents();
         setInterval(pollEvents, 4000);
         setInterval(() => renderTimeline(), 30000); // refresca los "hace X min"
 
