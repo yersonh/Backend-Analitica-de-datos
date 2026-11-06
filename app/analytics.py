@@ -92,7 +92,7 @@ PLAUSIBLE_BPM = (30, 220)      # mismo rango que pulse.py
 IQR_K = 3.0                    # factor IQR para atípicos (3 = solo atípicos extremos)
 EAR_RANGO = (0.0, 1.0)         # EAR posible por definición (ojo cerrado ... muy abierto)
 MAR_RANGO = (0.0, 2.0)         # MAR posible por definición (boca cerrada ... muy abierta)
-REENVIO_S = 1.0                # misma lectura repetida antes de esto = reenvío del dispositivo
+REENVIO_S = 1.0                # mismo valor otra vez antes de esto = lectura repetida, sin información nueva
 RANDOM_STATE = 42
 # Criterios de éxito (CRISP-DM fase 1). Propuestos para un sistema de
 # seguridad: perder fatiga real es peor que una falsa alarma, por eso se exige
@@ -274,14 +274,16 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     df = df.drop_duplicates(subset=["session_id", "timestamp", "source"])
     exactos = before - len(df)
 
-    # Reenvíos: el servidor pone la hora al recibir, así que si un ESP32 manda
-    # dos veces la misma lectura (p. ej. porque no le llegó la respuesta) las
-    # dos filas tienen horas distintas y no son duplicados exactos. Se marca
-    # como reenvío la lectura que repite los MISMOS valores medidos que la
-    # anterior de su sesión y fuente, a menos de REENVIO_S. El pulso llega cada
-    # ~2 s y las fotos cada ~0,33 s, y dos fotos distintas no dan el mismo EAR,
-    # MAR e inclinación hasta el último decimal. Los frames sin rostro no
-    # cuentan: todos tienen los valores vacíos aunque sean fotos distintas.
+    # Lecturas repetidas: el ESP32 no reintenta envíos, pero el servidor pone la
+    # hora al RECIBIR. Si un envío se demora en la red y el siguiente llega
+    # rápido, entre los dos quedan menos de 2 s; y como mientras espera la
+    # respuesta el ESP32 no lee el sensor, el BPM (promedio de los últimos
+    # latidos) sale igual. Esa segunda fila no trae información nueva y contaría
+    # dos veces el mismo estado, así que se quita la lectura que repite los
+    # MISMOS valores medidos que la anterior de su sesión y fuente a menos de
+    # REENVIO_S. Dos fotos distintas no dan el mismo EAR, MAR e inclinación hasta
+    # el último decimal. Los frames sin rostro no cuentan: todos tienen los
+    # valores vacíos aunque sean fotos distintas.
     df = df.sort_values(["session_id", "source", "timestamp"])
     valores = {"frame": ["ear", "mar", "head_tilt_deg"], "pulso": ["bpm"]}
     reenvio = pd.Series(False, index=df.index)
@@ -1120,9 +1122,11 @@ def interpret(report: dict) -> dict:
         for r in q.get("duplicados_detalle", []):
             por[r["fuente"]] = por.get(r["fuente"], 0) + 1
         fuentes = " y ".join(f"{v} de {'pulso' if k_ == 'pulso' else 'cámara'}" for k_, v in por.items())
-        f2.append(f"Se eliminaron {dup} lecturas repetidas ({fuentes or 'reenvíos'}), un "
-                  f"{_f(100 * dup / max(total, 1), 2)} % del total: no cambia los resultados, pero muestra que "
-                  "el dispositivo a veces reenvía cuando no recibe respuesta a tiempo.")
+        f2.append(f"Se eliminaron {dup} lecturas repetidas ({fuentes or 'repetidas'}), un "
+                  f"{_f(100 * dup / max(total, 1), 2)} % del total: no cambia los resultados. Son envíos que "
+                  "llegaron con menos de 1 s de diferencia y el mismo valor, porque la red los demoró y el "
+                  "sensor no alcanzó a registrar un latido nuevo entre uno y otro; el segundo no aporta "
+                  "información nueva.")
     malos = int(q.get("bpm_implausibles") or 0) + int(q.get("valores_inconsistentes") or 0)
     f2.append("No hay lecturas físicamente imposibles: el sensor de pulso y la medición de la cara "
               "trabajaron dentro de sus rangos." if malos == 0 else

@@ -693,7 +693,7 @@ class _QualitySection extends StatelessWidget {
                 label: 'Duplicados',
                 value: n(q['duplicados_eliminados'], 0),
                 hint: 'eliminados: ${n(q['duplicados_exactos'], 0)} exactos (misma hora) y '
-                    '${n(q['duplicados_reenvios'], 0)} reenvíos (mismos valores en < 1 s)',
+                    '${n(q['duplicados_reenvios'], 0)} repetidas (mismo valor en < 1 s)',
               ),
               KpiTile(
                 label: 'Frames sin rostro',
@@ -733,6 +733,10 @@ class _QualitySection extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w600, color: C.text, fontSize: 13.5),
               ),
               children: [
+                const Note(
+                  'Son envíos distintos que llegaron con menos de 1 s de diferencia y exactamente el mismo valor: la red demoró uno y el si'
+                  'guiente llegó rápido, y el sensor no alcanzó a registrar un latido nuevo entre los dos. Se quita el segundo porque repite el mismo estado y lo contaría dos veces.',
+                ),
                 for (final d in _list(q['duplicados_detalle']).map(_map))
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
