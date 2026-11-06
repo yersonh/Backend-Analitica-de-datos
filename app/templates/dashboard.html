@@ -1972,9 +1972,9 @@
                     <div class="kpi"><div class="label">Sesiones / personas</div><div class="value">${n(q.sesiones, 0)} / ${n(q.personas, 0)}</div><div class="hint">persona = texto antes de "_"</div></div>
                 </div>
                 ${(q.duplicados_detalle || []).length ? `<details class="dict-more"><summary>Ver las ${q.duplicados_detalle.length} lecturas repetidas que se eliminaron</summary>
-                <p class="note">Son envíos distintos que llegaron con menos de 1 s de diferencia y exactamente el mismo valor: la red demoró uno y el siguiente llegó rápido, y el sensor no alcanzó a registrar un latido nuevo entre los dos. Se quita el segundo porque repite el mismo estado y lo contaría dos veces.</p>
-                <div class="table-wrap"><table class="dict"><thead><tr><th>Sesión</th><th>Fuente</th><th>Hora</th><th>Valores repetidos</th><th>Segundos tras la original</th></tr></thead><tbody>` +
-                q.duplicados_detalle.map(r => `<tr><td>${esc(r.session_id)}</td><td>${r.fuente === "pulso" ? "Pulso" : "Cámara"}</td><td>${esc(String(r.hora).replace("T", " "))}</td><td>${Object.entries(r.valores || {}).map(([k, v]) => `${esc(k)} = ${n(v, 3)}`).join(" · ")}</td><td>${n(r.segundos_tras_original, 3)}</td></tr>`).join("") +
+                <p class="note">Cada fila son dos lecturas de la misma sesión que llegaron casi al mismo tiempo (menos de 1 s; lo normal es una cada 2 s) con exactamente el mismo valor. La red demoró una y la siguiente llegó rápido, y el sensor no alcanzó a registrar un latido nuevo entre las dos. Se quita la segunda porque repite el mismo dato y lo contaría dos veces.</p>
+                <div class="table-wrap"><table class="dict"><thead><tr><th>Sesión</th><th>Fuente</th><th>Valor de las dos lecturas</th><th>Llegó la original</th><th>Llegó la repetida (se quitó)</th><th>Diferencia</th></tr></thead><tbody>` +
+                q.duplicados_detalle.map(r => `<tr><td>${esc(r.session_id)}</td><td>${r.fuente === "pulso" ? "Pulso" : "Cámara"}</td><td><b>${Object.entries(r.valores || {}).map(([k, v]) => `${esc(k)} = ${n(v, 3)}`).join(" · ")}</b></td><td>${esc(String(r.hora_original || "—").replace("T", " "))}</td><td>${esc(String(r.hora).replace("T", " "))}</td><td>${n(r.segundos_tras_original, 3)} s</td></tr>`).join("") +
                 `</tbody></table></div></details>` : ""}
             </section>`;
         }

@@ -734,17 +734,20 @@ class _QualitySection extends StatelessWidget {
               ),
               children: [
                 const Note(
-                  'Son envíos distintos que llegaron con menos de 1 s de diferencia y exactamente el mismo valor: la red demoró uno y el si'
-                  'guiente llegó rápido, y el sensor no alcanzó a registrar un latido nuevo entre los dos. Se quita el segundo porque repite el mismo estado y lo contaría dos veces.',
+                  'Cada fila son dos lecturas de la misma sesión que llegaron casi al mismo tiempo (menos de 1 s; lo normal '
+                  'es una cada 2 s) con exactamente el mismo valor. La red demoró una y la siguiente llegó rápido, y el sensor '
+                  'no alcanzó a registrar un latido nuevo entre las dos. Se quita la segunda porque repite el mismo dato y lo '
+                  'contaría dos veces.',
                 ),
                 for (final d in _list(q['duplicados_detalle']).map(_map))
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Text(
                       '${d['session_id']} · ${d['fuente'] == 'pulso' ? 'Pulso' : 'Cámara'} · '
-                      '${'${d['hora']}'.replaceAll('T', ' ')}\n'
-                      '${_map(d['valores']).entries.map((e) => '${e.key} = ${n(e.value, 3)}').join(' · ')} '
-                      '(${n(d['segundos_tras_original'], 3)} s tras la original)',
+                      '${_map(d['valores']).entries.map((e) => '${e.key} = ${n(e.value, 3)}').join(' · ')}\n'
+                      'Original: ${'${d['hora_original'] ?? '—'}'.replaceAll('T', ' ')}\n'
+                      'Repetida (se quitó): ${'${d['hora']}'.replaceAll('T', ' ')} '
+                      '(+${n(d['segundos_tras_original'], 3)} s)',
                       style: const TextStyle(color: C.text, fontSize: 12.5, height: 1.4),
                     ),
                   ),

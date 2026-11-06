@@ -296,10 +296,13 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         iguales = (g[cols] == g[cols].shift()).all(axis=1) & g[cols].notna().all(axis=1)
         marca = (dt < REENVIO_S) & iguales
         reenvio.loc[g.index] = marca
+        anterior = pd.Series(g.index, index=g.index).shift()   # fila con la que se compara
         for i in g.index[marca.values]:
             detalle.append({
                 "session_id": g.at[i, "session_id"], "fuente": fuente,
-                "hora": g.at[i, "timestamp"],
+                # con milésimas: las dos lecturas están a menos de 1 s
+                "hora": g.at[i, "timestamp"].isoformat(timespec="milliseconds"),
+                "hora_original": g.at[anterior.at[i], "timestamp"].isoformat(timespec="milliseconds"),
                 "valores": {c: g.at[i, c] for c in cols},
                 "segundos_tras_original": round(float(dt.at[i]), 3),
             })
