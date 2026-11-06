@@ -257,6 +257,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         d: _map(r['descriptiva']),
         labels: labels,
         ventana: (params['ventana_s'] as num?)?.toInt() ?? _ventana,
+        diccionario: _map(params['diccionario']),
       ),
       if (ok('clustering')) _ClusterSection(c: _map(r['clustering']), labels: labels),
       if (ok('clasificacion')) _ClassifySection(k: _map(r['clasificacion'])),
@@ -675,11 +676,96 @@ class _QualitySection extends StatelessWidget {
   }
 }
 
+/// Diccionario de variables de cada ventana (mismo contenido que el panel web,
+/// viene en parametros.diccionario del reporte).
+class _VariableDictionary extends StatelessWidget {
+  const _VariableDictionary({required this.dic});
+  final Map<String, dynamic> dic;
+
+  @override
+  Widget build(BuildContext context) {
+    final vars = _list(dic['caracteristicas']).map(_map).toList();
+    final otras = _list(dic['otras_columnas']).map(_map).toList();
+    if (vars.isEmpty) return const SizedBox.shrink();
+    const code = TextStyle(color: C.muted, fontSize: 11.5, fontFamily: 'monospace');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SubTitle('Diccionario de variables de cada ventana'),
+        const Note('Estas 8 variables se calculan en cada ventana y son las que usan todos los modelos de la fase 4.'),
+        const SizedBox(height: 8),
+        for (final v in vars)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: C.cardHi.withValues(alpha: 0.6),
+              border: Border.all(color: C.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text('${v['nombre']}', style: const TextStyle(fontWeight: FontWeight.w700, color: C.text)),
+                    ),
+                    Pill(
+                      v['fatiga'] == 'Sube' ? '↑ sube con fatiga' : '↓ baja con fatiga',
+                      color: v['fatiga'] == 'Sube' ? C.rojo : C.cyan,
+                    ),
+                  ],
+                ),
+                Text('${v['clave']} · ${v['fuente']}', style: code),
+                const SizedBox(height: 6),
+                Text('${v['mide']}', style: const TextStyle(color: C.text, fontSize: 13)),
+                const SizedBox(height: 4),
+                Note('Cálculo: ${v['calculo']}'),
+                Note('Rango: ${v['rango']}'),
+              ],
+            ),
+          ),
+        if (otras.isNotEmpty)
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            expandedAlignment: Alignment.centerLeft,
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            title: const Text(
+              'Otras columnas de la ventana (identificación, calidad y etiquetas)',
+              style: TextStyle(fontWeight: FontWeight.w600, color: C.text, fontSize: 13.5),
+            ),
+            children: [
+              const Note(
+                'No entran a los modelos como variables, pero aparecen en el dataset que se descarga en CSV. '
+                'Las de rol «Etiqueta» son la respuesta que los modelos supervisados intentan predecir.',
+              ),
+              const SizedBox(height: 6),
+              for (final o in otras)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${o['nombre']} · ${o['rol']}', style: const TextStyle(fontWeight: FontWeight.w600, color: C.text)),
+                      Text('${o['clave']}', style: code),
+                      Note('${o['descripcion']}'),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
 class _DescriptiveSection extends StatelessWidget {
-  const _DescriptiveSection({required this.d, required this.labels, required this.ventana});
+  const _DescriptiveSection({required this.d, required this.labels, required this.ventana, required this.diccionario});
   final Map<String, dynamic> d;
   final Map<String, String> labels;
   final int ventana;
+  final Map<String, dynamic> diccionario;
 
   @override
   Widget build(BuildContext context) {
@@ -694,7 +780,7 @@ class _DescriptiveSection extends StatelessWidget {
     final ventanaTxt = ventana >= 60 ? '${ventana ~/ 60} min' : '$ventana s';
 
     return GlassCard(
-      title: 'Fase 3 · Preparación: ventanas y análisis descriptivo',
+      title: 'Fase 3 · Preparación de los datos: ventanas y análisis descriptivo',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -705,6 +791,7 @@ class _DescriptiveSection extends StatelessWidget {
             'al basal. Resultado: ${n(d['ventanas_totales'], 0)} ventanas, ${n(d['ventanas_completas'], 0)} con '
             'todas las variables.',
           ),
+          _VariableDictionary(dic: diccionario),
           const SubTitle('Serie temporal por ventana · BPM medio'),
           _lineChart([
             ('BPM medio', C.rojo, [for (final r in serie) asDouble(r['bpm_mean'])]),

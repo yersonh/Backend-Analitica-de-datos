@@ -75,7 +75,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier, export_text
 
-from . import database
+from . import database, pulse, vision
 
 # --- Parámetros del pipeline (ajustables) ---
 VENTANA_DEFECTO_S = 60         # ventana de agregación: 1 minuto (metodología del documento)
@@ -123,6 +123,93 @@ FEATURE_LABELS = {
     "bpm_std": "Desv. BPM",
     "bpm_drop_pct": "Caída BPM vs basal (%)",
 }
+
+
+def variable_dictionary() -> dict:
+    """Diccionario de datos de una ventana: qué mide cada columna, cómo se
+    calcula, su rango y qué indica sobre la fatiga. Los umbrales se leen de
+    vision.py y pulse.py para que el texto nunca quede desactualizado."""
+    ear_t, mar_t, tilt_t = vision.EAR_THRESHOLD, vision.MAR_THRESHOLD, vision.HEAD_TILT_THRESHOLD_DEG
+    drop_t = round(pulse.RELATIVE_DROP_THRESHOLD * 100)
+    f = lambda v: f"{v:g}".replace(".", ",")
+    caracteristicas = [
+        {"clave": "ear_mean", "fuente": "Cámara",
+         "mide": "Qué tan abiertos están los ojos (Eye Aspect Ratio).",
+         "calculo": "Promedio del EAR de los frames de la ventana en que se detectó la cara. "
+                    "EAR = (suma de las 2 distancias verticales del ojo) / (2 × distancia horizontal), "
+                    "promediando el ojo izquierdo y el derecho.",
+         "rango": f"0–1 (ojo abierto ≈ 0,25–0,35; cerrado si < {f(ear_t)})",
+         "fatiga": "Baja"},
+        {"clave": "perclos", "fuente": "Cámara",
+         "mide": "Porcentaje de tiempo con los ojos cerrados (PERCLOS).",
+         "calculo": f"% de frames con cara en los que el EAR quedó por debajo de {f(ear_t)}.",
+         "rango": "0–100 %",
+         "fatiga": "Sube"},
+        {"clave": "mar_max", "fuente": "Cámara",
+         "mide": "Máxima apertura de la boca (Mouth Aspect Ratio).",
+         "calculo": "Valor más alto del MAR en la ventana. MAR = promedio de 3 aperturas verticales de "
+                    "la boca / ancho de la boca (entre comisuras).",
+         "rango": f"0–2 (bostezo si > {f(mar_t)})",
+         "fatiga": "Sube"},
+        {"clave": "yawn_count", "fuente": "Cámara",
+         "mide": "Cuánto tiempo estuvo la boca muy abierta.",
+         "calculo": f"Número de frames de la ventana con MAR > {f(mar_t)}. Un bostezo dura varios "
+                    "frames, así que no es el número de bostezos sino su duración en frames.",
+         "rango": "0 o más (frames)",
+         "fatiga": "Sube"},
+        {"clave": "tilt_abs_mean", "fuente": "Cámara",
+         "mide": "Inclinación lateral de la cabeza (cabeceo).",
+         "calculo": "Promedio del ángulo de la línea entre los dos ojos, sin signo (izquierda o derecha cuentan igual).",
+         "rango": f"Grados; 0° = cabeza recta (relevante si > {f(tilt_t)}°)",
+         "fatiga": "Sube"},
+        {"clave": "bpm_mean", "fuente": "Sensor de pulso",
+         "mide": "Frecuencia cardiaca media.",
+         "calculo": "Promedio de las lecturas de pulso (BPM) de la ventana, sin las implausibles ni los atípicos.",
+         "rango": f"{PLAUSIBLE_BPM[0]}–{PLAUSIBLE_BPM[1]} BPM",
+         "fatiga": "Baja"},
+        {"clave": "bpm_std", "fuente": "Sensor de pulso",
+         "mide": "Variabilidad del pulso dentro de la ventana.",
+         "calculo": "Desviación estándar de las lecturas de BPM de la ventana.",
+         "rango": f"0 o más BPM (baja si < {f(pulse.LOW_VARIABILITY_STD)})",
+         "fatiga": "Baja"},
+        {"clave": "bpm_drop_pct", "fuente": "Sensor de pulso",
+         "mide": "Cuánto bajó el pulso respecto al normal de esa persona.",
+         "calculo": "(BPM basal − BPM medio) / BPM basal × 100. El basal es la mediana de las primeras "
+                    f"{pulse.BASELINE_SAMPLE_COUNT} lecturas válidas de la sesión.",
+         "rango": f"Porcentaje; positivo = por debajo del basal (señal si ≥ {drop_t} %)",
+         "fatiga": "Sube"},
+    ]
+    for v in caracteristicas:
+        v["nombre"] = FEATURE_LABELS[v["clave"]]
+    otras = [
+        {"clave": "timestamp", "nombre": "Inicio de la ventana", "rol": "Identificación",
+         "descripcion": "Fecha y hora en que empieza la ventana."},
+        {"clave": "session_id", "nombre": "Sesión", "rol": "Identificación",
+         "descripcion": "Sesión de monitoreo (persona_prueba, p. ej. lauren_1)."},
+        {"clave": "persona", "nombre": "Persona", "rol": "Identificación",
+         "descripcion": "Texto antes del primer \"_\" del session_id. Sirve para separar entrenamiento y prueba por persona."},
+        {"clave": "ear_min", "nombre": "EAR mínimo", "rol": "Contexto",
+         "descripcion": "EAR más bajo de la ventana (el instante con los ojos más cerrados)."},
+        {"clave": "pct_rostro", "nombre": "% de frames con cara", "rol": "Calidad",
+         "descripcion": "Porcentaje de frames de la ventana en que se detectó la cara."},
+        {"clave": "baseline_bpm", "nombre": "BPM basal", "rol": "Contexto",
+         "descripcion": "Pulso normal de la persona, usado para calcular la caída del BPM."},
+        {"clave": "n_lecturas", "nombre": "Lecturas", "rol": "Calidad",
+         "descripcion": "Cantidad de lecturas (frames + pulso) que cayeron en la ventana."},
+        {"clave": "estado_fusion", "nombre": "Estado de la fusión", "rol": "Contexto",
+         "descripcion": "Peor estado que dio el sistema en la ventana: normal, vigilancia, alerta o advertencia de sensor."},
+        {"clave": "riesgo", "nombre": "Nivel de riesgo", "rol": "Contexto",
+         "descripcion": "Mayor nivel de riesgo de la ventana (medio o alto), si hubo alerta."},
+        {"clave": "fatiga_regla", "nombre": "Fatiga según las reglas", "rol": "Etiqueta",
+         "descripcion": "1 si el estado de la fusión fue alerta, 0 si no. Etiqueta que se usa cuando no hay KSS."},
+        {"clave": "kss", "nombre": "KSS", "rol": "Etiqueta",
+         "descripcion": f"Autoreporte de somnolencia (1–9) hecho en los {int(KSS_MAX_AGE.total_seconds() // 60)} "
+                        "minutos anteriores a la ventana."},
+        {"clave": "somnoliento_kss", "nombre": "Somnoliento según KSS", "rol": "Etiqueta",
+         "descripcion": f"1 si el KSS es ≥ {KSS_SOMNOLIENTO}, 0 si es menor. Es la etiqueta real para evaluar los modelos."},
+    ]
+    return {"caracteristicas": caracteristicas, "otras_columnas": otras}
+
 
 _STATUS_PRIORITY = {"advertencia_sensor": 0, "normal": 1, "vigilancia": 2, "alerta": 3}
 
@@ -949,6 +1036,7 @@ def full_report(session_id: str, ventana_s: int = VENTANA_DEFECTO_S) -> dict:
         "disponible": True,
         "metodologia": "CRISP-DM",
         "parametros": {"ventana_s": int(ventana_s), "variables": FEATURES,
+                       "diccionario": variable_dictionary(),
                        "etiquetas_variables": FEATURE_LABELS,
                        "criterios_exito": {"recall": CRITERIO_RECALL, "precision": CRITERIO_PRECISION}},
         "calidad_datos": quality,

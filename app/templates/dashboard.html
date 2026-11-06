@@ -661,6 +661,14 @@
         .analytics .kpi .value { font-family: var(--mono); font-weight: 600; }
         .analytics .table-wrap { overflow-x: auto; }
         .analytics table { width: 100%; border-collapse: collapse; }
+        /* Diccionario de variables: texto, alineado a la izquierda y con saltos de línea */
+        .analytics table.dict th, .analytics table.dict td { text-align: left; vertical-align: top; font-variant-numeric: normal; }
+        .analytics table.dict td { line-height: 1.45; }
+        .analytics table.dict td code { font-size: 0.74rem; color: var(--muted); }
+        .analytics .fatiga-sube { color: #b4354f; font-weight: 600; white-space: nowrap; }
+        .analytics .fatiga-baja { color: #1d6fa5; font-weight: 600; white-space: nowrap; }
+        .analytics details.dict-more { margin-top: 10px; }
+        .analytics details.dict-more summary { cursor: pointer; font-weight: 600; font-size: 0.86rem; }
         .analytics tbody tr { border-top: 1px solid var(--line); transition: background .2s; }
         .analytics tbody tr:hover { background: rgba(108, 111, 214,.06); }
         .analytics thead th { color: var(--muted); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
@@ -1979,10 +1987,25 @@
             const byState = estKeys.length ? `<h3>Promedio de cada variable según el estado de la fusión</h3><div class="table-wrap"><table><thead><tr><th>Variable</th>${estKeys.map(s => `<th>${esc(s)}</th>`).join("")}</tr></thead><tbody>` +
                 Object.keys(L).map(v => `<tr><td>${esc(L[v])}</td>${estKeys.map(s => `<td>${n(est[s][v])}</td>`).join("")}</tr>`).join("") + `</tbody></table></div>` : "";
 
+            const dic = params.diccionario || { caracteristicas: [], otras_columnas: [] };
+            const flecha = (t) => t === "Sube" ? `<span class="fatiga-sube">↑ sube</span>` : `<span class="fatiga-baja">↓ baja</span>`;
+            const diccionario = dic.caracteristicas.length ? `
+                <h3>Diccionario de variables de cada ventana</h3>
+                <p class="note">Estas 8 variables se calculan en cada ventana y son las que usan todos los modelos de la fase 4.</p>
+                <div class="table-wrap"><table class="dict"><thead><tr><th>Variable</th><th>Fuente</th><th>Qué mide</th><th>Cómo se calcula</th><th>Rango</th><th>Con fatiga</th></tr></thead><tbody>` +
+                dic.caracteristicas.map(v => `<tr><td><b>${esc(v.nombre)}</b><br><code>${esc(v.clave)}</code></td><td>${esc(v.fuente)}</td><td>${esc(v.mide)}</td><td>${esc(v.calculo)}</td><td>${esc(v.rango)}</td><td>${flecha(v.fatiga)}</td></tr>`).join("") +
+                `</tbody></table></div>
+                <details class="dict-more"><summary>Otras columnas de la ventana (identificación, calidad y etiquetas)</summary>
+                <p class="note">No entran a los modelos como variables, pero aparecen en el dataset que se descarga en CSV. Las de rol «Etiqueta» son la respuesta que los modelos supervisados intentan predecir.</p>
+                <div class="table-wrap"><table class="dict"><thead><tr><th>Columna</th><th>Rol</th><th>Descripción</th></tr></thead><tbody>` +
+                dic.otras_columnas.map(v => `<tr><td><b>${esc(v.nombre)}</b><br><code>${esc(v.clave)}</code></td><td>${esc(v.rol)}</td><td>${esc(v.descripcion)}</td></tr>`).join("") +
+                `</tbody></table></div></details>` : "";
+
             return `
             <section class="an-panel glass" id="descriptiva">
                 <h2>Fase 3 · Preparación de los datos: ventanas y análisis descriptivo</h2>
                 <p class="lead">Las lecturas de cámara (~cada 1,5 s) y de pulso (~cada 2 s) llegan en instantes distintos. Para integrarlas se agrupan en ventanas de ${params.ventana_s >= 60 ? (params.ventana_s / 60) + " min" : params.ventana_s + " s"} y en cada una se calculan las variables: EAR medio, PERCLOS (porcentaje de frames con ojos cerrados), MAR máximo, número de bostezos, inclinación media, BPM medio, su desviación y la caída porcentual del BPM respecto al basal de la persona. Resultado: <b>${n(d.ventanas_totales,0)}</b> ventanas, <b>${n(d.ventanas_completas,0)}</b> con todas las variables.</p>
+                ${diccionario}
                 <h3>Serie temporal por ventana</h3>
                 <div class="chart-box tall"><canvas id="ch-serie"></canvas></div>
                 <div class="grid2">
