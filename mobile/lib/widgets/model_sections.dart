@@ -23,14 +23,14 @@ class RegressionSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (g['disponible'] != true) {
       return GlassCard(
-        title: 'Fase 4c · Regresión logística / lineal',
+        title: 'Fase 4d · Regresión logística / lineal',
         child: EmptyState('${g['mensaje'] ?? ''}', icon: Icons.functions),
       );
     }
     final elegido = g['modelo_elegido'] == 'lineal' ? 'lineal' : 'logística';
     final lin = _map(g['lineal']), log = _map(g['logistica']);
     return GlassCard(
-      title: 'Fase 4c · Regresión (elegida: $elegido)',
+      title: 'Fase 4d · Modelado: regresión (elegida: $elegido)',
       icon: Icons.functions,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

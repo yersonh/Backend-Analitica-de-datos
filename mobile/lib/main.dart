@@ -2,7 +2,7 @@
 //
 // La detección (MediaPipe, pulso, fusión) y la base de datos siguen en el
 // servidor; los ESP32 continúan enviando a /frame y /pulso. Esta app replica
-// el panel web: login con roles, estado en vivo, historial, analítica KDD,
+// el panel web: login con roles, estado en vivo, historial, analítica CRISP-DM,
 // autoreporte KSS y gestión de usuarios.
 
 import 'package:flutter/material.dart';

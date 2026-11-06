@@ -20,7 +20,9 @@ CADA lectura recibida de los ESP32:
                                 de anomalías con Isolation Forest (anomalies).
   5. Evaluación              -> silueta, matriz de confusión, precisión,
                                 recall, F1, AUC, R², MAE, validación cruzada y
-                                comparación contra modelos base.
+                                comparación contra modelos base; veredicto
+                                frente a los criterios de la fase 1
+                                (evaluate_criteria).
   6. Despliegue              -> reglas de fusion.py en tiempo real, panel web
                                 y app móvil; recomendaciones derivadas de los
                                 resultados.
@@ -156,7 +158,7 @@ def _insufficient(msg: str, **extra) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 1. Selección
+# Fase 2 · Comprensión de los datos: carga de las lecturas
 # ---------------------------------------------------------------------------
 
 def load_readings(session_id: str) -> pd.DataFrame:
@@ -169,7 +171,7 @@ def load_readings(session_id: str) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 2. Preprocesamiento
+# Fase 2-3 · Calidad (comprensión) y limpieza (preparación de los datos)
 # ---------------------------------------------------------------------------
 
 def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -243,7 +245,7 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
 
 # ---------------------------------------------------------------------------
-# 3. Transformación: integración visión + pulso en ventanas
+# Fase 3 · Preparación de los datos: integración visión + pulso en ventanas
 # ---------------------------------------------------------------------------
 
 def _worst_status(s: pd.Series):
@@ -340,7 +342,7 @@ def _complete(w: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 4a. Minería descriptiva
+# Fase 2-3 · Exploración descriptiva de las ventanas
 # ---------------------------------------------------------------------------
 
 def describe(w: pd.DataFrame, session_id: str) -> dict:
@@ -395,7 +397,7 @@ def describe(w: pd.DataFrame, session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 4b. Clustering (no supervisado): K-Means
+# Fase 4a · Modelado: clustering (no supervisado) con K-Means
 # ---------------------------------------------------------------------------
 
 def cluster(w: pd.DataFrame) -> dict:
@@ -479,7 +481,7 @@ def cluster(w: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 4c. Clasificación (supervisado): árbol de decisión + comparación
+# Fase 4b · Modelado: clasificación (supervisado) con árbol de decisión + comparación
 # ---------------------------------------------------------------------------
 
 def _binary_target(wc: pd.DataFrame) -> tuple[pd.DataFrame, str, str, str | None]:
@@ -633,7 +635,7 @@ def classify(w: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 4d. Regresión: logística (objetivo binario) o lineal (objetivo continuo)
+# Fase 4d · Modelado: regresión logística (objetivo binario) o lineal (objetivo continuo)
 # ---------------------------------------------------------------------------
 
 def _coefs(model, intercept_label: str) -> tuple[list[dict], str]:
@@ -806,7 +808,7 @@ def regression(w: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 4e. Detección de anomalías: Isolation Forest
+# Fase 4c · Modelado: detección de anomalías con Isolation Forest
 # ---------------------------------------------------------------------------
 
 def anomalies(w: pd.DataFrame, contamination: float = 0.05) -> dict:
@@ -834,6 +836,58 @@ def anomalies(w: pd.DataFrame, contamination: float = 0.05) -> dict:
         "ventanas_analizadas": len(wc),
         "anomalias_detectadas": int(flag.sum()),
         "anomalias": out.head(50).to_dict(orient="records"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fase 5 · Evaluación frente a los criterios de éxito de la fase 1
+# ---------------------------------------------------------------------------
+
+def evaluate_criteria(clasificacion: dict, regresion: dict) -> dict:
+    """Compara los modelos supervisados (fase 4) con los criterios de éxito
+    definidos en la fase 1 (CRITERIO_RECALL, CRITERIO_PRECISION) y dice si
+    el resultado se puede dar por válido."""
+    candidatos = [("Árbol de decisión", clasificacion or {}),
+                  ("Regresión logística", (regresion or {}).get("logistica") or {})]
+    modelos = []
+    for nombre, m in candidatos:
+        if not m.get("disponible"):
+            continue
+        rec, prec = m["metricas"]["recall"], m["metricas"]["precision"]
+        modelos.append({
+            "modelo": nombre,
+            "recall": rec,
+            "precision": prec,
+            "f1": m["metricas"]["f1"],
+            "cumple_recall": rec >= CRITERIO_RECALL,
+            "cumple_precision": prec >= CRITERIO_PRECISION,
+            "cumple": rec >= CRITERIO_RECALL and prec >= CRITERIO_PRECISION,
+            "fuente_etiqueta": m.get("fuente_etiqueta"),
+        })
+    if not modelos:
+        return _insufficient("Aún no hay modelos supervisados entrenados para compararlos "
+                             "con los criterios de éxito de la fase 1.")
+    etiqueta_real = all("KSS" in (r["fuente_etiqueta"] or "") for r in modelos)
+    cumplen = [r["modelo"] for r in modelos if r["cumple"]]
+    quienes = " y ".join(cumplen)
+    plural = len(cumplen) > 1
+    if cumplen and etiqueta_real:
+        conclusion = (f"{quienes} {'cumplen' if plural else 'cumple'} los criterios de éxito, evaluados "
+                      "contra el autoreporte KSS: el resultado es válido para pasar al despliegue.")
+    elif cumplen:
+        conclusion = (f"{quienes} {'alcanzan' if plural else 'alcanza'} los criterios, pero la etiqueta sale de las "
+                      "mismas reglas de fusion.py, así que no es una validación independiente. Para "
+                      "darlo por bueno hay que repetir la evaluación con autoreportes KSS.")
+    else:
+        conclusion = ("Ningún modelo alcanza todavía los criterios de éxito. Hay que seguir "
+                      "recolectando datos (cámara y pulso a la vez) y autoreportes KSS, o ajustar "
+                      "las variables y umbrales antes de desplegar.")
+    return {
+        "disponible": True,
+        "criterios": {"recall": CRITERIO_RECALL, "precision": CRITERIO_PRECISION},
+        "modelos": modelos,
+        "etiqueta_real": etiqueta_real,
+        "conclusion": conclusion,
     }
 
 
@@ -875,6 +929,7 @@ def full_report(session_id: str, ventana_s: int = VENTANA_DEFECTO_S) -> dict:
         "regresion": regression(w),
         "anomalias": anomalies(w),
     }
+    report["evaluacion"] = evaluate_criteria(report["clasificacion"], report["regresion"])
     return _clean(report)
 
 

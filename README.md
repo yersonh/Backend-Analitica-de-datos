@@ -79,11 +79,23 @@ firmado de la cookie): `POST /api/login`, `POST /api/cuenta/clave` y
 
 ### Analítica de datos (CRISP-DM)
 
-`app/analytics.py` sigue las 6 fases de CRISP-DM y el reporte
-(`GET /analitica/reporte`) devuelve la calidad de datos, la preparación en
-ventanas, el modelado (K-Means, árbol de decisión, **regresión**, Isolation
-Forest) y su evaluación. Cada modelo se muestra cuando hay datos suficientes
-para calcularlo; mientras tanto, la tarjeta *Modelos pendientes* dice qué falta.
+`app/analytics.py` sigue las 6 fases de CRISP-DM, y el panel web y la app
+las muestran en orden con su nombre:
+
+1. **Comprensión del negocio**: objetivo y criterios de éxito (recall ≥ 0,80,
+   precisión ≥ 0,70; `CRITERIO_RECALL` / `CRITERIO_PRECISION`).
+2. **Comprensión de los datos**: calidad de las lecturas (`preprocess`).
+3. **Preparación de los datos**: limpieza, ventanas de tiempo y análisis
+   descriptivo (`build_windows`, `describe`).
+4. **Modelado**: 4a K-Means, 4b árbol de decisión, 4c Isolation Forest,
+   4d **regresión** logística o lineal.
+5. **Evaluación**: métricas de cada modelo y veredicto de si cumple los
+   criterios de la fase 1 (`evaluate_criteria`).
+6. **Despliegue**: reglas de `fusion.py` en tiempo real, panel web y app.
+
+El reporte (`GET /analitica/reporte`) devuelve todo eso en JSON (la fase 5 en
+`evaluacion`). Cada modelo se muestra cuando hay datos suficientes para
+calcularlo; mientras tanto, la tarjeta *Modelos pendientes* dice qué falta.
 
 **Regresión logística o lineal** (`regression()`): se elige según la variable
 objetivo disponible.

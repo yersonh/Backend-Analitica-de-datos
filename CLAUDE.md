@@ -189,7 +189,8 @@ up to 20 recent minutes each, one row per minute with mean EAR/BPM; a minute wit
 any `vigilancia` reading is never `normal`, and minutes with an alert/sensor
 warning are left out; cached `MINUTES_CACHE_SECONDS` per session in `main.py`);
 the Historial on web and app merges them with the episodes. The app mirrors the web's
-light pastel palette (`theme.dart`), hides the CRISP-DM summary and the model
+light pastel palette (`theme.dart`), shows the six CRISP-DM phases in order (phase 1 criteria, phase 5
+`evaluacion` verdict from `analytics.evaluate_criteria`, phase 6 deployment), hides the model
 sections that are not `disponible` (a "Modelos pendientes" card says what is
 missing, on web too), and shows the ESP32 video only with `todas_sesiones` (the
 conductor is driving and has no use for it), though anyone can pick the phone camera.

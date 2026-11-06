@@ -1,5 +1,6 @@
-// Analítica de datos (proceso KDD): calidad, descriptiva, K-Means, árbol de
-// decisión y anomalías. Consume GET /analitica/reporte igual que el panel web.
+// Analítica de datos con la metodología CRISP-DM: fase 1 (negocio), fase 2
+// (calidad), fase 3 (ventanas y descriptiva), fase 4 (K-Means, árbol de
+// decisión, anomalías y regresión), fase 5 (evaluación) y fase 6 (despliegue). Consume GET /analitica/reporte igual que el panel web.
 
 import 'dart:io';
 
@@ -236,8 +237,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   List<Widget> _sectionsFor(Map<String, dynamic> r) {
     final params = _map(r['parametros']);
     final labels = _map(params['etiquetas_variables']).map((k, v) => MapEntry(k, '$v'));
-    // Igual que el panel web: sin resumen CRISP-DM, y cada modelo aparece solo
-    // cuando ya hay datos suficientes para calcularlo.
+    // Igual que el panel web: las 6 fases de CRISP-DM en orden, y cada modelo
+    // aparece solo cuando ya hay datos suficientes para calcularlo.
     bool ok(String k) => _map(r[k])['disponible'] == true;
     const modelos = {
       'clustering': 'K-Means',
@@ -250,6 +251,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         if (!ok(m.key) && _map(r[m.key])['mensaje'] != null) (m.value, '${_map(r[m.key])['mensaje']}'),
     ];
     return [
+      _BusinessSection(criterios: _map(params['criterios_exito'])),
       _QualitySection(q: _map(r['calidad_datos'])),
       _DescriptiveSection(
         d: _map(r['descriptiva']),
@@ -260,6 +262,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       if (ok('clasificacion')) _ClassifySection(k: _map(r['clasificacion'])),
       if (ok('anomalias')) _AnomaliesSection(a: _map(r['anomalias']), labels: labels),
       if (ok('regresion')) RegressionSection(g: _map(r['regresion'])),
+      if (ok('evaluacion')) _EvaluationSection(ev: _map(r['evaluacion'])),
+      const _DeploymentSection(),
       if (pendientes.isNotEmpty) _PendingSection(modelos: pendientes),
     ];
   }
@@ -475,6 +479,129 @@ class _PendingSection extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CRISP-DM: fases 1, 5 y 6 (mismos textos que el panel web)
+// ---------------------------------------------------------------------------
+
+class _BusinessSection extends StatelessWidget {
+  const _BusinessSection({required this.criterios});
+  final Map<String, dynamic> criterios;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      title: 'Fase 1 · Comprensión del negocio',
+      icon: Icons.flag_outlined,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Note(
+            'Objetivo: detectar a tiempo la fatiga del conductor combinando dos fuentes, la cámara (ojos, boca y '
+            'cabeza) y el pulso, para alertarlo y avisar al supervisor antes de un accidente. Un sistema de seguridad '
+            'debe perder la menor cantidad posible de fatiga real, aunque eso cueste alguna falsa alarma; por eso se '
+            'pide más recall que precisión.',
+          ),
+          const SizedBox(height: 12),
+          KpiGrid(
+            children: [
+              KpiTile(
+                label: 'Criterio de éxito · Recall',
+                value: '≥ ${pct(criterios['recall'])}',
+                hint: 'de la fatiga real, cuánta debe detectarse',
+              ),
+              KpiTile(
+                label: 'Criterio de éxito · Precisión',
+                value: '≥ ${pct(criterios['precision'])}',
+                hint: 'de las alertas, cuántas deben ser fatiga',
+              ),
+              const KpiTile(
+                label: 'Etiqueta real',
+                value: 'KSS ≥ 7',
+                hint: 'autoreporte de somnolencia (escala 1–9)',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EvaluationSection extends StatelessWidget {
+  const _EvaluationSection({required this.ev});
+  final Map<String, dynamic> ev;
+
+  @override
+  Widget build(BuildContext context) {
+    final crit = _map(ev['criterios']);
+    final modelos = _list(ev['modelos']).map(_map).toList();
+    Widget mark(String valor, bool ok) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(valor),
+        const SizedBox(width: 6),
+        Pill(ok ? '✓ cumple' : '✗ no cumple', color: ok ? C.verde : C.rojo),
+      ],
+    );
+    final real = ev['etiqueta_real'] == true;
+    return GlassCard(
+      title: 'Fase 5 · Evaluación frente a los criterios de éxito',
+      icon: Icons.fact_check_outlined,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Note(
+            'Se comparan los modelos supervisados de la fase 4, medidos con ventanas que no usaron para entrenar, '
+            'contra los criterios de la fase 1: recall ≥ ${pct(crit['recall'])} y precisión ≥ ${pct(crit['precision'])}.',
+          ),
+          const SizedBox(height: 8),
+          SimpleTable(
+            headers: const ['Modelo', 'Recall', 'Precisión', 'F1', '¿Cumple?'],
+            rows: [
+              for (final m in modelos)
+                [
+                  '${m['modelo']}',
+                  mark(pct(m['recall']), m['cumple_recall'] == true),
+                  mark(pct(m['precision']), m['cumple_precision'] == true),
+                  n(m['f1'], 3),
+                  m['cumple'] == true ? '✓ Sí' : '✗ No',
+                ],
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: (real ? C.verde : C.ambar).withValues(alpha: 0.1),
+              border: Border.all(color: (real ? C.verde : C.ambar).withValues(alpha: 0.4)),
+            ),
+            child: Text('${ev['conclusion'] ?? ''}', style: const TextStyle(color: C.text, fontSize: 13, height: 1.4)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeploymentSection extends StatelessWidget {
+  const _DeploymentSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return const GlassCard(
+      title: 'Fase 6 · Despliegue',
+      icon: Icons.rocket_launch_outlined,
+      child: Note(
+        'El conocimiento obtenido se usa en tiempo real: el motor de fusión (fusion.py) solo da alerta cuando la '
+        'cámara y el pulso muestran fatiga a la vez, el ESP32 hace sonar el buzzer, y el supervisor sigue a cada '
+        'conductor en el panel web y en esta app. Los datos y el dataset preparado se pueden exportar en CSV para '
+        'nuevas iteraciones del proceso.',
       ),
     );
   }
@@ -817,7 +944,7 @@ class _ClassifySection extends StatelessWidget {
     final comp = _list(k['comparacion_modelos']).map(_map).toList();
 
     return GlassCard(
-      title: 'Fase 4b · Modelado y evaluación: árbol de decisión (supervisado)',
+      title: 'Fase 4b · Modelado: árbol de decisión (supervisado)',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -947,13 +1074,13 @@ class _AnomaliesSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (a['disponible'] != true) {
       return GlassCard(
-        title: 'Fase 4d · Detección de anomalías',
+        title: 'Fase 4c · Detección de anomalías',
         child: EmptyState('${a['mensaje'] ?? ''}', icon: Icons.radar),
       );
     }
     final rows = _list(a['anomalias']).map(_map).toList();
     return GlassCard(
-      title: 'Fase 4d · Modelado: anomalías con Isolation Forest',
+      title: 'Fase 4c · Modelado: anomalías con Isolation Forest',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

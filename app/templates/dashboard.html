@@ -1069,7 +1069,7 @@
         </div>
         {% endif %}
 
-        <footer>SIDFAM · prototipo académico · estado en vivo cada 1,5 s · analítica con pandas y scikit-learn (KDD / CRISP-DM) · <a href="/docs">API</a></footer>
+        <footer>SIDFAM · prototipo académico · estado en vivo cada 1,5 s · analítica con pandas y scikit-learn (metodología CRISP-DM) · <a href="/docs">API</a></footer>
     </div>
 
     <div class="toasts" id="toasts" aria-live="assertive"></div>
@@ -1944,7 +1944,7 @@
             const a = q.atipicos_eliminados || {};
             return `
             <section class="an-panel glass" id="calidad">
-                <h2>1–2 · Selección y preprocesamiento</h2>
+                <h2>Fase 2 · Comprensión de los datos: calidad</h2>
                 <p class="lead">Se toman todas las lecturas crudas de la sesión (tabla <code>sensor_readings</code>) y se revisa su calidad: duplicados, faltantes, lecturas imposibles y atípicos. Los valores problemáticos se reemplazan por nulos en vez de borrar la fila completa.</p>
                 <div class="kpis">
                     <div class="kpi"><div class="label">Registros</div><div class="value">${n(q.registros_iniciales, 0)}</div><div class="hint">${n(q.lecturas_frame,0)} frames · ${n(q.lecturas_pulso,0)} pulso</div></div>
@@ -1979,7 +1979,7 @@
 
             return `
             <section class="an-panel glass" id="descriptiva">
-                <h2>3 · Transformación y análisis descriptivo</h2>
+                <h2>Fase 3 · Preparación de los datos: ventanas y análisis descriptivo</h2>
                 <p class="lead">Las lecturas de cámara (~cada 1,5 s) y de pulso (~cada 2 s) llegan en instantes distintos. Para integrarlas se agrupan en ventanas de ${params.ventana_s >= 60 ? (params.ventana_s / 60) + " min" : params.ventana_s + " s"} y en cada una se calculan las variables: EAR medio, PERCLOS (porcentaje de frames con ojos cerrados), MAR máximo, número de bostezos, inclinación media, BPM medio, su desviación y la caída porcentual del BPM respecto al basal de la persona. Resultado: <b>${n(d.ventanas_totales,0)}</b> ventanas, <b>${n(d.ventanas_completas,0)}</b> con todas las variables.</p>
                 <h3>Serie temporal por ventana</h3>
                 <div class="chart-box tall"><canvas id="ch-serie"></canvas></div>
@@ -2049,7 +2049,7 @@
                 cr.filas.map((f, i) => `<tr><td>${esc(f)}</td>${cr.valores[i].map(v => `<td>${v}</td>`).join("")}</tr>`).join("") + `</tbody></table></div>`;
             return `
             <section class="an-panel glass" id="clustering">
-                <h2>4a · Clustering con K-Means (no supervisado)</h2>
+                <h2>Fase 4a · Modelado: clustering K-Means (no supervisado)</h2>
                 <p class="lead">Sin usar ninguna etiqueta, K-Means agrupa las ventanas por similitud en las 8 variables (estandarizadas con z-score). El número de grupos se elige con el coeficiente de silueta y cada grupo se nombra según su centroide: mayor PERCLOS, caída de BPM y bostezos → "Somnolencia".</p>
                 <div class="kpis">
                     <div class="kpi"><div class="label">Grupos (k)</div><div class="value">${c.k}</div></div>
@@ -2094,7 +2094,7 @@
                 k.comparacion_modelos.map(r => `<tr><td>${esc(r.modelo)}</td><td>${n(r.f1_medio, 3)}</td><td>± ${n(r.f1_desv, 3)}</td></tr>`).join("") + `</tbody></table></div>` : "";
             return `
             <section class="an-panel glass" id="clasificacion">
-                <h2>4b · Clasificación con árbol de decisión (supervisado) y evaluación</h2>
+                <h2>Fase 4b · Modelado: árbol de decisión (supervisado)</h2>
                 <p class="lead">El árbol aprende a predecir si una ventana corresponde a fatiga a partir de las 8 variables. Se entrena con una parte de las ventanas y se evalúa con otra que el modelo no vio. Etiqueta usada: <b>${esc(k.fuente_etiqueta)}</b>.</p>
                 <p class="note" style="margin-top:-8px">Partición entrenamiento/prueba: ${esc(k.particion)}</p>
                 ${k.advertencia ? `<div class="warn">${esc(k.advertencia)}</div>` : ""}
@@ -2142,7 +2142,7 @@
             const L = g.logistica, R = g.lineal;
             const elegido = g.modelo_elegido === "lineal" ? "Regresión lineal" : "Regresión logística";
             let html = `<section class="an-panel glass" id="regresion">
-                <h2>4d · Regresión (modelo elegido: ${elegido})</h2>
+                <h2>Fase 4d · Modelado: regresión (modelo elegido: ${elegido})</h2>
                 <div class="warn" style="border-color:#6c6fd6;color:inherit">${esc(g.motivo)}</div>`;
             if (R.disponible) {
                 const m = R.metricas;
@@ -2206,13 +2206,49 @@
             const rows = a.anomalias.map(r => `<tr><td>${esc((r.timestamp || "").replace("T", " "))}</td><td>${esc(r.estado_fusion)}</td><td>${esc(r.variable_mas_atipica)}</td><td>${n(r.puntaje_anomalia, 3)}</td><td>${n(r.ear_mean, 3)}</td><td>${n(r.perclos, 1)}</td><td>${n(r.yawn_count, 0)}</td><td>${n(r.tilt_abs_mean, 1)}</td><td>${n(r.bpm_mean, 1)}</td><td>${n(r.bpm_drop_pct, 1)}</td></tr>`).join("");
             return `
             <section class="an-panel glass" id="anomalias">
-                <h2>4c · Detección de anomalías con Isolation Forest</h2>
+                <h2>Fase 4c · Modelado: anomalías con Isolation Forest</h2>
                 <p class="lead">Isolation Forest marca las ventanas cuya combinación de variables se aleja del patrón general (${esc(a.algoritmo)}). Pueden ser episodios de fatiga intensos o problemas de captura (mala iluminación, sensor mal puesto) que conviene revisar. Se detectaron <b>${a.anomalias_detectadas}</b> de ${a.ventanas_analizadas} ventanas.</p>
                 ${rows ? `<div class="table-wrap"><table><thead><tr><th>Ventana</th><th>Estado</th><th>Variable más atípica</th><th>Puntaje</th><th>${esc(L.ear_mean)}</th><th>${esc(L.perclos)}</th><th>${esc(L.yawn_count)}</th><th>${esc(L.tilt_abs_mean)}</th><th>${esc(L.bpm_mean)}</th><th>${esc(L.bpm_drop_pct)}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">Sin anomalías.</div>`}
             </section>`;
         }
 
         // Los modelos sin datos no se dibujan: esta tarjeta dice qué les falta
+        // ---------- CRISP-DM: fases 1, 5 y 6 ----------
+        function renderBusiness(params) {
+            const c = (params && params.criterios_exito) || {};
+            return `
+            <section class="an-panel glass" id="negocio">
+                <h2>Fase 1 · Comprensión del negocio</h2>
+                <p class="lead">Objetivo: detectar a tiempo la fatiga del conductor combinando dos fuentes, la cámara (ojos, boca y cabeza) y el pulso, para alertarlo y avisar al supervisor antes de un accidente. Un sistema de seguridad debe perder la menor cantidad posible de fatiga real, aunque eso cueste alguna falsa alarma; por eso se pide más recall que precisión.</p>
+                <div class="kpis">
+                    <div class="kpi"><div class="label">Criterio de éxito · Recall</div><div class="value">≥ ${pct(c.recall)}</div><div class="hint">de la fatiga real, cuánta debe detectarse</div></div>
+                    <div class="kpi"><div class="label">Criterio de éxito · Precisión</div><div class="value">≥ ${pct(c.precision)}</div><div class="hint">de las alertas, cuántas deben ser fatiga</div></div>
+                    <div class="kpi"><div class="label">Etiqueta real</div><div class="value">KSS ≥ 7</div><div class="hint">autoreporte de somnolencia (escala 1–9)</div></div>
+                </div>
+            </section>`;
+        }
+
+        function renderEvaluation(ev) {
+            if (!ev || !ev.disponible) return "";
+            const mark = (ok) => ok ? `<span class="pill">✓ cumple</span>` : `<span class="pill bad">✗ no cumple</span>`;
+            const rows = ev.modelos.map(r => `<tr><td><b>${esc(r.modelo)}</b></td><td>${pct(r.recall)} ${mark(r.cumple_recall)}</td><td>${pct(r.precision)} ${mark(r.cumple_precision)}</td><td>${n(r.f1, 3)}</td><td>${r.cumple ? "✓ Sí" : "✗ No"}</td></tr>`).join("");
+            return `
+            <section class="an-panel glass" id="evaluacion">
+                <h2>Fase 5 · Evaluación frente a los criterios de éxito</h2>
+                <p class="lead">Se comparan los modelos supervisados de la fase 4, medidos con ventanas que no usaron para entrenar, contra los criterios de la fase 1: recall ≥ ${pct(ev.criterios.recall)} y precisión ≥ ${pct(ev.criterios.precision)}.</p>
+                <div class="table-wrap"><table><thead><tr><th>Modelo</th><th>Recall</th><th>Precisión</th><th>F1</th><th>¿Cumple los criterios?</th></tr></thead><tbody>${rows}</tbody></table></div>
+                <div class="warn" style="${ev.etiqueta_real ? "border-color:#3ea88c;color:inherit" : ""}">${esc(ev.conclusion)}</div>
+            </section>`;
+        }
+
+        function renderDeployment() {
+            return `
+            <section class="an-panel glass" id="despliegue">
+                <h2>Fase 6 · Despliegue</h2>
+                <p class="lead">El conocimiento obtenido se usa en tiempo real: el motor de fusión (<code>fusion.py</code>) solo da alerta cuando la cámara y el pulso muestran fatiga a la vez, el ESP32 hace sonar el buzzer, y el supervisor sigue a cada conductor en este panel web y en la app móvil. Los datos y el dataset preparado se pueden exportar en CSV para nuevas iteraciones del proceso.</p>
+            </section>`;
+        }
+
         function renderPending(r) {
             const faltan = [["K-Means", r.clustering], ["Árbol de decisión", r.clasificacion], ["Anomalías", r.anomalias], ["Regresión", r.regresion]]
                 .filter(([, m]) => m && !m.disponible && m.mensaje);
@@ -2270,9 +2306,10 @@
                     box.innerHTML = `<section class="an-panel glass"><div class="empty">${esc(r.mensaje)}<br><br>Deja los ESP32 enviando datos unos minutos y presiona <b>Recalcular</b>.</div></section>`;
                     return;
                 }
-                box.innerHTML = renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
+                box.innerHTML = renderBusiness(r.parametros) + renderQuality(r.calidad_datos) + renderDescriptive(r.descriptiva, r.parametros) +
                     renderCluster(r.clustering, r.parametros) + renderClassify(r.clasificacion) +
-                    renderAnomalies(r.anomalias, r.parametros) + renderRegression(r.regresion || { disponible: false, mensaje: "" }) + renderPending(r);
+                    renderAnomalies(r.anomalias, r.parametros) + renderRegression(r.regresion || { disponible: false, mensaje: "" }) +
+                    renderEvaluation(r.evaluacion) + renderDeployment() + renderPending(r);
                 chartsDescriptive(r.descriptiva);
                 chartsCluster(r.clustering);
                 chartsClassify(r.clasificacion);

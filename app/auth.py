@@ -6,7 +6,7 @@ Roles (de mayor a menor alcance):
   - administrador -> todo lo del supervisor + gestión de usuarios (crear,
                      cambiar rol/sesión, desactivar, restablecer contraseña).
   - supervisor    -> ve TODAS las sesiones en vivo, el historial y la
-                     analítica (KDD), exporta CSV y registra KSS.
+                     analítica (CRISP-DM), exporta CSV y registra KSS.
   - conductor     -> ve SOLO su sesión asignada (users.session_id) en vivo,
                      su historial y la analítica de SUS datos
                      (analitica_propia), y registra su propio KSS. Sin
