@@ -28,9 +28,14 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - Dashboard: http://localhost:8000/ — Swagger: http://localhost:8000/docs
 - Use `--host 0.0.0.0` and the machine's LAN IP so the ESP32s can reach it; set
-  the same IP in `SERVER_HOST` in the firmware sketches.
+  the same IP in `SERVER_URL` (camera sketch) / `SERVER_HOST` (pulse sketch).
 
-There is no test suite, linter, or build step. Exercise endpoints manually
+Tests: `pip install -r requirements-dev.txt && python -m pytest -q` (`tests/`:
+pulse rules, fusion rules incl. microsleep/calibration, ingest + recalibrate
+endpoints; a fake `clock` fixture patches `time.time`, the API tests use a temp
+SQLite). Python 3.11/3.12 (mediapipe 0.10.13 has no 3.13 wheels). Run them after
+touching `pulse.py`, `fusion.py`, `vision.py` or the ingest endpoints; there is
+no linter or build step. Exercise endpoints manually
 (read endpoints need a login cookie; ingest needs `X-Device-Key` when
 `DEVICE_API_KEY` is set):
 
@@ -62,23 +67,36 @@ Request flow for both ingest endpoints (`app/main.py`):
 Each analysis module exposes a **single module-level singleton** instantiated at
 import time (`face_analyzer`, `pulse_analyzer`, `fusion_engine`) — MediaPipe model
 creation and the sliding buffers are expensive/stateful, so they are shared across
-requests. This makes the app single-process and stateful in memory; the database
+requests. This makes the app single-process (one uvicorn worker) and stateful in memory; the database
 (Postgres in prod, SQLite locally — see `app/database.py`) is the only durable
 store. Restarting uvicorn clears pulse buffers, the learned
 per-session `baseline_bpm`, and fusion timers, but keeps everything persisted
 (events + `reading_stats`).
 
+The ingest endpoints (`/frame`, `/pulso`, `/api/camara/dispositivo`) are plain
+`def`, not `async def`, so FastAPI runs them in its threadpool and the blocking
+MediaPipe/OpenCV/DB work never stalls the event loop (MJPEG stream, login,
+`/estado`). Therefore the singletons are **thread-safe by locks**:
+`FaceAnalyzer._lock` around `FaceMesh.process` (not thread-safe),
+`PulseAnalyzer._lock`, `FusionEngine._lock` (RLock; public methods take it,
+`_`-prefixed internals assume it is held). Keep new ingest endpoints sync and new
+state behind those locks. Frames over `MAX_FRAME_BYTES` (2 MB) get 413.
+
 **`app/vision.py`** — stateless per call. MediaPipe Face Mesh (468 pretrained
-landmarks, no training). Computes EAR (eye closure), MAR (yawn), head-tilt angle,
-and returns boolean flags against `EAR_THRESHOLD` / `MAR_THRESHOLD` /
-`HEAD_TILT_THRESHOLD_DEG`. Landmark index arrays at the top of the file follow the
+landmarks, no training). Computes EAR (eye closure), MAR (yawn), head-tilt (roll)
+angle and `pitch_ratio` (nose between eye line and chin; only meaningful against
+its per-session baseline), and returns boolean flags against the **fixed**
+`EAR_THRESHOLD` / `MAR_THRESHOLD` / `HEAD_TILT_THRESHOLD_DEG`. `fusion.py`
+overrides `eyes_closed` / `head_tilted` in place once the session is calibrated. Landmark index arrays at the top of the file follow the
 standard EAR/MAR point ordering — changing them breaks the ratio math.
 
 **`app/pulse.py`** — stateful. Keeps a 60s sliding `deque` per `session_id`
 (`WINDOW_SECONDS`), needs `MIN_SAMPLES_FOR_ANALYSIS` readings before it reports.
 Drowsiness is judged **relative to the person's own baseline**, not absolute BPM:
-the median of the first `BASELINE_SAMPLE_COUNT` plausible readings fixes
-`baseline_bpm` (never recalculated); `relative_drop_signal` fires when the window
+after skipping `BASELINE_WARMUP_COUNT` readings, the median of the next
+`BASELINE_SAMPLE_COUNT` plausible readings fixes `baseline_bpm` (not chased
+during a trip; discarded after `IDLE_RESET_SECONDS` without readings or by
+`reset()`); `relative_drop_signal` fires when the window
 **median** falls `RELATIVE_DROP_THRESHOLD` (8%) below it. `bpm_median` is exposed
 in `/estado` so the drop meters show that same measure. `low_variability` (std below
 `LOW_VARIABILITY_STD`) never triggers on its own, because the ESP32 sends
@@ -94,7 +112,19 @@ already sends computed BPM; raw IR/RED peak detection would go here.
 **`app/fusion.py`** — stateful, the decision core (RF05–RF07). Holds a
 `_SessionState` per `session_id` tracking *since when* eyes/head have been in a
 bad state, so a signal only counts once sustained for `EYES_CLOSED_SUSTAIN_SECONDS`
-/ `HEAD_TILT_SUSTAIN_SECONDS` (yawn counts immediately). Only signals fresher than
+/ `HEAD_TILT_SUSTAIN_SECONDS` / `YAWN_SUSTAIN_SECONDS`.
+**Personal vision calibration**: the first `CALIBRATION_FRAMES` face frames fix
+`ear_baseline` / `pitch_baseline` (medians); afterwards eyes closed =
+EAR < `ear_threshold(baseline)` (`EAR_CLOSED_FRACTION`, clamped to
+`[EAR_THRESHOLD_MIN, EAR_THRESHOLD_MAX]`) and head tilted also when pitch deviates
+more than `PITCH_DEVIATION` from its baseline. Calibration resets after
+`IDLE_RESET_SECONDS` without frames or via `reset()`. `POST
+/api/sesiones/recalibrar` (permission `panel`, through `resolve_session`, not
+`todas`) calls both `pulse_analyzer.reset` and `fusion_engine.reset`; the web
+and app have a *Recalibrar* button on the meters card. **Microsleep**: eyes closed
+≥ `MICROSLEEP_SECONDS` sets `microsueno` in the status, which turns the buzzer on
+(`buzzer_auto`) **without** changing the status (stays `vigilancia`) or saving an
+event — RF05 still governs persisted episodes. Only signals fresher than
 `SIGNAL_FRESHNESS_SECONDS` (10s) count. **RF05: a fatigue event requires BOTH a
 visual signal AND `physiological_drowsy_signal` at the same time.** `risk_level`
 is by count of concrete `reasons`: 2 → `"medio"`, 3+ → `"alto"` (no `"bajo"`). A
@@ -201,9 +231,10 @@ conductor is driving and has no use for it), though anyone can pick the phone ca
 
 ## Firmware ↔ backend contract
 
-The camera sketch actually flashed is `camara` (repo root; QVGA, a frame every
-~333 ms for the live video); `firmware/esp32cam_frame_sender` is the older
-reference (VGA, ~1.5s). Both POST `multipart/form-data` to `/frame` with fields
+`firmware/esp32cam_frame_sender` is the camera sketch actually flashed (QVGA, a
+frame every ~333 ms for the live video, `SERVER_URL` http or https). Keep real
+WiFi names, keys and production URLs out of the committed sketches (placeholders
+only). It POSTs `multipart/form-data` to `/frame` with fields
 `session_id` and `file` (JPEG). `firmware/esp32_pulse_sender` POSTs
 `application/x-www-form-urlencoded` `bpm` + `session_id` to `/pulso` every ~2s
 and drives an active buzzer on GPIO 25 from the response's `"buzzer"` field
@@ -226,7 +257,9 @@ cameras never mix in one fusion; the ESP32 resumes by itself when it stops. Web:
 the face would change the EAR) and sends `malla=true` to get the landmarks back and
 draw them over the smooth local video. App: `mobile/lib/widgets/device_camera.dart`.
 Never change `/frame`, its `X-Device-Key` auth or the sketches for this feature.
-`/estado` exposes `camara_fuente` (`dispositivo` / `esp32` / null).
+`/estado` exposes `camara_fuente` (`dispositivo` / `esp32` / null), plus
+`microsueno`, `pitch_ratio`, `ear_basal`, `ear_umbral` (personal threshold, used
+by the web/app EAR meter and trend when not null) and `pitch_basal`.
 
 **Live camera and buzzer** (`app/main.py`, in memory only): `/frame` stores the
 last frame per session already annotated by `app/overlay.py` (mesh, eye/mouth
@@ -235,7 +268,7 @@ when stale > `CAMERA_STALE_SECONDS`) and `GET /api/camara/stream` pushes each ne
 frame as MJPEG (`multipart/x-mixed-replace`, closes when stale). The web
 dashboard shows that stream in the hero's eye scanner while `/estado`
 reports `camara_activa`. `buzzer` is true while the fusion status is
-`alerta` or for the seconds a supervisor requested via `POST /api/buzzer`
+`alerta`, during a microsleep (`microsueno`), or for the seconds a supervisor requested via `POST /api/buzzer`
 (permission `todas_sesiones`); `/estado` exposes `buzzer`, `buzzer_auto`,
 `buzzer_manual_seg` and `camara_activa`. A restart clears frames and pending
 buzzer requests. In the app, `home_screen.dart` raises a drowsiness alarm when
