@@ -5,7 +5,17 @@ Usa MediaPipe Face Mesh (468 landmarks, modelo preentrenado, sin
 entrenamiento propio) para calcular:
   - EAR (Eye Aspect Ratio)  -> detecta parpadeo prolongado / cierre de ojos
   - MAR (Mouth Aspect Ratio) -> detecta bostezos
-  - Inclinación de cabeza (roll aproximado) -> cabeceo
+  - Inclinación de cabeza (roll aproximado) -> cabeceo lateral
+  - Razón de pitch (nariz entre la línea de ojos y el mentón) -> cabeceo
+    hacia adelante/atrás. Depende de dónde esté montada la cámara, así que
+    no tiene umbral fijo: fusion.py lo compara con el basal de la sesión.
+
+Los flags eyes_closed / head_tilted que devuelve este módulo usan umbrales
+FIJOS. fusion.py los reajusta con la calibración personal de cada sesión
+(basal de EAR y de pitch) cuando ya la tiene.
+
+FaceMesh de MediaPipe no es thread-safe: los endpoints de ingesta corren en
+el threadpool de FastAPI, así que la llamada al modelo va bajo un Lock.
 
 Referencia clásica para EAR/MAR: Soukupová & Čech (2016),
 "Real-Time Eye Blink Detection using Facial Landmarks".
@@ -13,6 +23,7 @@ Referencia clásica para EAR/MAR: Soukupová & Čech (2016),
 
 from dataclasses import dataclass, field
 import math
+import threading
 
 import cv2
 import mediapipe as mp
@@ -29,6 +40,7 @@ MOUTH = [61, 291, 39, 181, 0, 17, 269, 405]
 NOSE_TIP = 1
 LEFT_EYE_OUTER = 33
 RIGHT_EYE_OUTER = 263
+CHIN = 152
 
 # --- Umbrales (ajustables según calibración con los compañeros) ---
 EAR_THRESHOLD = 0.21          # por debajo de esto, ojo considerado "cerrado"
@@ -45,6 +57,8 @@ class VisionResult:
     eyes_closed: bool = False
     yawning: bool = False
     head_tilted: bool = False
+    # (nariz - ojos) / (mentón - ojos) en vertical; sube al cabecear hacia adelante.
+    pitch_ratio: float | None = None
     # Los 468 puntos en píxeles, solo para dibujar la vista del modelo (app/overlay.py);
     # no se guardan ni se envían en el JSON.
     landmarks: list[tuple[float, float]] | None = field(default=None, repr=False)
@@ -86,6 +100,18 @@ def _head_tilt_degrees(landmarks) -> float:
     return angle
 
 
+def _pitch_ratio(landmarks) -> float | None:
+    """Posición vertical de la punta de la nariz entre la línea de los ojos (0)
+    y el mentón (1). Con la cabeza de frente ronda 0.4-0.5 (según la cámara);
+    al caer la cabeza hacia adelante el mentón se acorta en la imagen y la razón
+    sube, al echarla hacia atrás baja. Solo es útil comparada con el basal."""
+    eyes_y = (landmarks[LEFT_EYE_OUTER][1] + landmarks[RIGHT_EYE_OUTER][1]) / 2.0
+    span = landmarks[CHIN][1] - eyes_y
+    if span <= 0:
+        return None
+    return (landmarks[NOSE_TIP][1] - eyes_y) / span
+
+
 class FaceAnalyzer:
     """Envoltorio sobre MediaPipe Face Mesh, pensado para reutilizar
     una sola instancia del modelo entre requests (es costoso crearlo
@@ -99,10 +125,12 @@ class FaceAnalyzer:
             refine_landmarks=False,
             min_detection_confidence=0.5,
         )
+        self._lock = threading.Lock()
 
     def analyze(self, image_bgr: np.ndarray) -> VisionResult:
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        results = self._face_mesh.process(image_rgb)
+        with self._lock:
+            results = self._face_mesh.process(image_rgb)
 
         if not results.multi_face_landmarks:
             return VisionResult(face_detected=False)
@@ -117,6 +145,7 @@ class FaceAnalyzer:
 
         mar = _mouth_aspect_ratio(landmarks, MOUTH)
         tilt = _head_tilt_degrees(landmarks)
+        pitch = _pitch_ratio(landmarks)
 
         return VisionResult(
             face_detected=True,
@@ -126,6 +155,7 @@ class FaceAnalyzer:
             eyes_closed=ear < EAR_THRESHOLD,
             yawning=mar > MAR_THRESHOLD,
             head_tilted=abs(tilt) > HEAD_TILT_THRESHOLD_DEG,
+            pitch_ratio=round(pitch, 4) if pitch is not None else None,
             landmarks=landmarks,
         )
 

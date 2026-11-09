@@ -74,9 +74,9 @@ class LiveScreen extends StatelessWidget {
                   dec: 2,
                   min: 0,
                   max: 0.4,
-                  ref: app.thr('ear'),
+                  ref: earThreshold(s, app),
                   refColor: C.rojo,
-                  refLabel: 'umbral ${app.thr('ear')}',
+                  refLabel: 'umbral ${earThreshold(s, app)}',
                 ),
               ),
               GlassCard(
@@ -469,6 +469,47 @@ class _FusionCard extends StatelessWidget {
   }
 }
 
+/// Umbral de EAR: el personal de la sesión (`ear_umbral` en /estado) cuando ya
+/// está calibrada; si no, el fijo de /api/config.
+double earThreshold(Map<String, dynamic> s, AppState app) {
+  final personal = asDouble(s['ear_umbral']);
+  return personal != null ? (personal * 1000).round() / 1000 : app.thr('ear');
+}
+
+/// Olvida los basales (pulso, EAR, pitch) de la sesión para volver a aprenderlos.
+class _RecalibrateButton extends StatefulWidget {
+  const _RecalibrateButton({required this.app});
+  final AppState app;
+
+  @override
+  State<_RecalibrateButton> createState() => _RecalibrateButtonState();
+}
+
+class _RecalibrateButtonState extends State<_RecalibrateButton> {
+  bool _busy = false;
+
+  Future<void> _recalibrate() async {
+    setState(() => _busy = true);
+    try {
+      await widget.app.api.postJson('/api/sesiones/recalibrar', {'session_id': widget.app.sessionId});
+      if (mounted) showSnack(context, 'Recalibrando: mira de frente a la cámara unos segundos');
+    } on ApiException catch (e) {
+      if (mounted) showSnack(context, e.message, ok: false);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: _busy ? null : _recalibrate,
+      icon: const Icon(Icons.restart_alt, size: 18),
+      label: const Text('Recalibrar'),
+    );
+  }
+}
+
 class _MetersCard extends StatelessWidget {
   const _MetersCard({required this.s, required this.app});
   final Map<String, dynamic> s;
@@ -476,7 +517,7 @@ class _MetersCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ear = app.thr('ear'), mar = app.thr('mar'), tilt = app.thr('head_tilt_deg');
+    final ear = earThreshold(s, app), mar = app.thr('mar'), tilt = app.thr('head_tilt_deg');
     final drop = app.thr('relative_drop'), std = app.thr('low_variability_std');
     final base = asDouble(s['baseline_bpm']), ref = asDouble(s['bpm_median']) ?? asDouble(s['bpm_mean']);
     final dropV = (base != null && base != 0 && ref != null)
@@ -549,6 +590,7 @@ class _MetersCard extends StatelessWidget {
     return GlassCard(
       title: 'Métricas por canal vs. umbral',
       icon: Icons.tune,
+      trailing: app.sessionId == 'todas' ? null : _RecalibrateButton(app: app),
       child: Column(
         children: [for (final (spec, v) in specs) MeterBar(spec: spec, value: v)],
       ),
@@ -614,8 +656,11 @@ class _BuzzerCardState extends State<_BuzzerCard> {
     final auto = s['buzzer_auto'] == true;
     final manual = asDouble(s['buzzer_manual_seg']) ?? 0;
     final canRing = widget.app.can('todas_sesiones');
+    final micro = s['microsueno'] == true;
     final text = !on
-        ? 'Apagado. Suena solo si se confirma fatiga.'
+        ? 'Apagado. Suena si se confirma fatiga o hay un microsueño.'
+        : micro
+        ? 'Sonando: ojos cerrados demasiado tiempo (posible microsueño).'
         : auto
         ? 'Sonando: fatiga confirmada por el sistema.'
         : 'Sonando por orden del supervisor (${manual.ceil()} s).';

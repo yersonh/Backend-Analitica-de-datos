@@ -13,6 +13,7 @@ Endpoints:
   GET  /api/camara/stream -> la misma cámara como video en vivo (MJPEG), para el panel web.
   POST /api/camara/dispositivo -> foto de la cámara del computador o del celular (con login).
   POST /api/buzzer -> un supervisor hace sonar el buzzer del conductor.
+  POST /api/sesiones/recalibrar -> olvida los basales (pulso, EAR, pitch) de una sesión.
   GET  /            -> dashboard HTML (RF09, RF10).
 
 Analítica de datos (ver app/analytics.py):
@@ -39,6 +40,11 @@ App móvil (Flutter, carpeta mobile/): autenticación con token Bearer.
   POST /api/cuenta/clave       -> cambia la contraseña y devuelve un token nuevo.
   GET  /api/config             -> umbrales, roles y parámetros del panel.
 
+Los endpoints de ingesta (/frame, /pulso, /api/camara/dispositivo) son `def`
+y no `async def`: MediaPipe, OpenCV y la base de datos bloquean, y en el
+threadpool no congelan el event loop (el stream MJPEG, el login, /estado).
+Los módulos de análisis protegen su estado con locks.
+
 /frame y /pulso no usan login: se autentican con la cabecera X-Device-Key
 (DEVICE_API_KEY). GET /estado acepta tanto sesión iniciada como esa cabecera. El resto exige sesión iniciada y el permiso del endpoint.
 
@@ -48,8 +54,10 @@ Ejecutar en desarrollo:
 
 import asyncio
 import io
+import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -63,13 +71,26 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from pydantic import BaseModel
 
-from . import analytics, auth, database, overlay, pulse, vision
+from . import analytics, auth, database, fusion, overlay, pulse, vision
 from .auth import User, require
 from .fusion import fusion_engine
 from .pulse import pulse_analyzer
 from .vision import face_analyzer
 
-app = FastAPI(title="SIDFAM Backend")
+log = logging.getLogger("sidfam")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    database.init_db()
+    auth.bootstrap()
+    if database.USE_POSTGRES and auth.DEVICE_API_KEY is None:
+        log.error("SIDFAM: DEVICE_API_KEY no está definida en producción (DATABASE_URL presente): "
+                  "/frame y /pulso aceptan datos de cualquiera. Defínela en las variables del servicio.")
+    yield
+
+
+app = FastAPI(title="SIDFAM Backend", lifespan=lifespan)
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -81,6 +102,17 @@ app.mount(
 )
 
 DEFAULT_SESSION_ID = "default"
+
+# Un frame QVGA JPEG del ESP32-CAM pesa ~10 KB; una foto del celular, unos cientos.
+MAX_FRAME_BYTES = 2 * 1024 * 1024
+
+
+def _read_frame(file: UploadFile) -> bytes:
+    """Lee el archivo subido sin aceptar más de MAX_FRAME_BYTES (413 si se pasa)."""
+    data = file.file.read(MAX_FRAME_BYTES + 1)
+    if len(data) > MAX_FRAME_BYTES:
+        raise HTTPException(status_code=413, detail=f"La imagen supera {MAX_FRAME_BYTES // 1024} KB")
+    return data
 
 # --- Cámara en vivo (solo en memoria, nunca en la base) ---
 # Último frame de cada sesión ya anotado con la vista del modelo (JPEG, hora).
@@ -108,14 +140,10 @@ BUZZER_MAX_SECONDS = 15
 
 def _buzzer_state(session_id: str, status: dict) -> dict:
     manual = max(0.0, _buzzer_until.get(session_id, 0.0) - time.time())
-    auto = status.get("status") == "alerta"
+    # Alerta confirmada (RF06) o microsueño (ojos cerrados > MICROSLEEP_SECONDS,
+    # aunque el pulso aún no confirme: ver fusion.py)
+    auto = status.get("status") == "alerta" or bool(status.get("microsueno"))
     return {"buzzer": auto or manual > 0, "buzzer_auto": auto, "buzzer_manual_seg": round(manual, 1)}
-
-
-@app.on_event("startup")
-def on_startup():
-    database.init_db()
-    auth.bootstrap()
 
 
 # ---------------------------------------------------------------------------
@@ -223,9 +251,9 @@ def _process_frame(raw_bytes: bytes, session_id: str, con_malla: bool = False) -
 
 
 @app.post("/frame", dependencies=[Depends(auth.require_device)])
-async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEFAULT_SESSION_ID)):
+def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEFAULT_SESSION_ID)):
     """Recibe un frame JPEG del ESP32-CAM."""
-    raw_bytes = await file.read()
+    raw_bytes = _read_frame(file)
     if _device_camera_active(session_id):
         status = fusion_engine.get_current_status(session_id)
         return {
@@ -239,7 +267,7 @@ async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEF
 
 
 @app.post("/api/camara/dispositivo")
-async def receive_device_frame(file: UploadFile = File(...), session_id: str | None = Form(None),
+def receive_device_frame(file: UploadFile = File(...), session_id: str | None = Form(None),
                                malla: bool = Form(False), user: User = Depends(require("panel"))):
     """Recibe un frame de la cámara del computador o del celular. Va por aparte de
     /frame: se autentica con el login del usuario y no con la clave del ESP32.
@@ -250,14 +278,14 @@ async def receive_device_frame(file: UploadFile = File(...), session_id: str | N
     if session_id and session_id != user.session_id:
         raise auth.Forbidden("La cámara del dispositivo solo puede enviar a tu propia sesión.")
     session_id = user.session_id
-    result = _process_frame(await file.read(), session_id, con_malla=malla)
+    result = _process_frame(_read_frame(file), session_id, con_malla=malla)
     if "error" not in result:
         _device_camera_at[session_id] = time.time()
     return result
 
 
 @app.post("/pulso", dependencies=[Depends(auth.require_device)])
-async def receive_pulse(bpm: float = Form(...), session_id: str = Form(DEFAULT_SESSION_ID)):
+def receive_pulse(bpm: float = Form(...), session_id: str = Form(DEFAULT_SESSION_ID)):
     """Recibe una lectura de BPM del ESP32 con el sensor de pulso."""
     pulse_result = pulse_analyzer.add_reading(session_id, bpm)
     event = fusion_engine.update_pulse(session_id, pulse_result)
@@ -401,6 +429,24 @@ def trigger_buzzer(body: BuzzerIn):
     segundos = max(1, min(BUZZER_MAX_SECONDS, body.segundos))
     _buzzer_until[body.session_id] = time.time() + segundos
     return {"session_id": body.session_id, "segundos": segundos}
+
+
+class RecalibrarIn(BaseModel):
+    session_id: str | None = None
+
+
+@app.post("/api/sesiones/recalibrar")
+def recalibrate_session(body: RecalibrarIn, user: User = Depends(require("panel"))):
+    """Olvida los basales de la sesión (pulso, EAR y pitch) para que se vuelvan a
+    aprender con las lecturas siguientes: otro conductor en el mismo equipo, la
+    cámara se movió, o el basal se tomó con el pulso agitado. El conductor solo
+    puede recalibrar la suya; supervisor/administrador, cualquiera."""
+    session_id = auth.resolve_session(user, body.session_id)
+    if not session_id or session_id == analytics.TODAS:
+        raise HTTPException(status_code=422, detail="Indica la sesión a recalibrar")
+    pulse_analyzer.reset(session_id)
+    fusion_engine.reset(session_id)
+    return {"session_id": session_id, "recalibrada": True}
 
 
 # Orden de la vista de flota: lo más urgente primero
@@ -753,6 +799,9 @@ def api_config(user: User = Depends(require(allow_password_change=True))):
             "head_tilt_deg": vision.HEAD_TILT_THRESHOLD_DEG,
             "relative_drop": pulse.RELATIVE_DROP_THRESHOLD,
             "low_variability_std": pulse.LOW_VARIABILITY_STD,
+            "microsleep_seconds": fusion.MICROSLEEP_SECONDS,
+            "ear_closed_fraction": fusion.EAR_CLOSED_FRACTION,
+            "pitch_deviation": fusion.PITCH_DEVIATION,
         },
         "roles": {k: {"label": v["label"], "descripcion": v["descripcion"], "permisos": sorted(v["permisos"])}
                   for k, v in auth.ROLES.items()},

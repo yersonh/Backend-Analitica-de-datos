@@ -494,6 +494,8 @@
         .wake-btn { padding: 7px 13px; border: 0; border-radius: 999px; background: var(--rojo); color: #fff; font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
         .wake-btn:hover { opacity: 0.85; }
         .wake-btn:disabled { opacity: 0.5; cursor: default; }
+        .recal-btn { margin-left: auto; padding: 5px 11px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: var(--violeta); font: inherit; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
+        .recal-btn:disabled { opacity: 0.5; cursor: default; }
         .buzzer-card { display: flex; align-items: center; gap: 14px; --c: var(--muted); }
         .buzzer-card.on { --c: var(--rojo); }
         .buzzer-card svg { width: 26px; height: 26px; flex: none; color: var(--c); }
@@ -957,6 +959,7 @@
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
                     Indicadores frente a umbral
+                    <button type="button" class="recal-btn" id="recal-btn" title="Olvida el basal de pulso, EAR y cabeceo de esta sesión y lo vuelve a aprender">Recalibrar</button>
                 </div>
                 <div class="meters" id="meters"></div>
             </section>
@@ -1288,8 +1291,10 @@
         })();
 
         // ---------- Medidores ----------
+        // Umbral de EAR: el fijo hasta que la sesión termina de calibrarse; luego el personal (/estado ear_umbral)
+        let earThr = THR.ear;
         const METERS = [
-            { id: "ear",  name: "Apertura ocular", hint: "EAR", max: 0.4, thr: THR.ear, bad: (v) => v < THR.ear, fmt: (v) => fmt(v, 3), thrLabel: "cierre " + THR.ear },
+            { id: "ear",  name: "Apertura ocular", hint: "EAR", max: 0.4, thr: THR.ear, bad: (v) => v < earThr, fmt: (v) => fmt(v, 3), thrLabel: "cierre " + THR.ear },
             { id: "mar",  name: "Apertura bucal",  hint: "MAR · bostezo", max: 1, thr: THR.mar, bad: (v) => v > THR.mar, fmt: (v) => fmt(v, 3), thrLabel: "bostezo " + THR.mar },
             { id: "tilt", name: "Inclinación de cabeza", hint: "grados", max: 45, thr: THR.head_tilt_deg, bad: (v) => v > THR.head_tilt_deg, fmt: (v) => fmt(v, 1) + "°", thrLabel: THR.head_tilt_deg + "°" },
             { id: "drop", name: "Caída vs. basal", hint: "mediana 60s", max: 0.2, thr: THR.relative_drop, bad: (v) => v >= THR.relative_drop, fmt: (v) => (v * 100).toFixed(1) + " %", thrLabel: (THR.relative_drop * 100) + " %" },
@@ -1368,7 +1373,7 @@
         }
         let lastBaseline = null;
         function renderTrends() {
-            drawTrend($("trend-ear"), hist.ear, { min: 0, max: 0.4, dec: 2, color: "#6c6fd6", ref: THR.ear, refColor: "#e0607e", refLabel: "umbral " + THR.ear, unit: "EAR" });
+            drawTrend($("trend-ear"), hist.ear, { min: 0, max: 0.4, dec: 2, color: "#6c6fd6", ref: earThr, refColor: "#e0607e", refLabel: "umbral " + earThr, unit: "EAR" });
             drawTrend($("trend-bpm"), hist.bpm, { auto: true, min: 50, max: 110, dec: 0, color: "#e0607e", ref: lastBaseline, refColor: "#9a9cc0", refLabel: lastBaseline ? "basal " + Math.round(lastBaseline) : "", unit: "BPM" });
         }
         new ResizeObserver(() => renderTrends()).observe($("trend-ear"));
@@ -1481,6 +1486,13 @@
             ecg.set(s.data_is_fresh ? bpm : null, s.implausible_reading ? "#cdb6ff" : (s.physiological_signal ? "#ffa3b8" : "#8fe3c0"));
 
             // medidores
+            const nuevoThr = s.ear_umbral != null ? Math.round(s.ear_umbral * 1000) / 1000 : THR.ear;
+            if (nuevoThr !== earThr) {
+                earThr = nuevoThr;
+                const tick = document.querySelector("#mt-ear .tick");
+                tick.style.left = clamp(earThr / 0.4, 0, 1) * 100 + "%";
+                tick.querySelector("span").textContent = (s.ear_umbral != null ? "cierre (personal) " : "cierre ") + earThr;
+            }
             setMeter("ear", s.ear);
             setMeter("mar", s.mar);
             setMeter("tilt", s.head_tilt_deg != null ? Math.abs(s.head_tilt_deg) : null);
@@ -1790,7 +1802,8 @@
             // el conductor solo lo ve mientras suena; "todas" no es un dispositivo
             card.style.display = SESSION !== "todas" && (CAN_FLEET || on) ? "" : "none";
             card.classList.toggle("on", on);
-            $("buzzer-text").textContent = !on ? "Apagado. Suena solo si se confirma fatiga."
+            $("buzzer-text").textContent = !on ? "Apagado. Suena si se confirma fatiga o hay un microsueño."
+                : s.microsueno ? "Sonando: ojos cerrados demasiado tiempo (posible microsueño)."
                 : s.buzzer_auto ? "Sonando: fatiga confirmada por el sistema."
                 : `Sonando por orden del supervisor (${Math.ceil(s.buzzer_manual_seg || 0)} s).`;
         }
@@ -1810,6 +1823,24 @@
             } finally { btn.disabled = false; }
         }
         if ($("buzzer-btn")) $("buzzer-btn").addEventListener("click", (ev) => ringBuzzer(SESSION, ev.currentTarget));
+
+        // ---------- Recalibrar basales (pulso, EAR, cabeceo) ----------
+        if (SESSION === "todas") $("recal-btn").style.display = "none";
+        $("recal-btn").addEventListener("click", async (ev) => {
+            const btn = ev.currentTarget;
+            btn.disabled = true;
+            try {
+                const r = await fetch("/api/sesiones/recalibrar", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: SESSION }),
+                });
+                if (r.status === 401) return toLogin();
+                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
+                toast({ risk_level: "buzzer", title: "Recalibrando", detail: "Mira de frente a la cámara unos segundos; el pulso tarda ~1 min.", c: "var(--verde)", silent: true });
+            } catch (err) {
+                toast({ risk_level: "buzzer", title: "No se pudo recalibrar", detail: err.message, c: "var(--rojo)", silent: true });
+            } finally { btn.disabled = false; }
+        });
 
         // ---------- Flota (quien ve todas las sesiones) ----------
         if (CAN_FLEET) {

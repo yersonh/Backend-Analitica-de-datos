@@ -17,12 +17,28 @@ basal; la baja variabilidad solo refuerza) frescas simultáneamente.
                                        "advertencia_sensor" (revisar el
                                        sensor, NO es fatiga del usuario)
 
+Excepción de seguridad (microsueño): si los ojos siguen cerrados más de
+MICROSLEEP_SECONDS, el buzzer suena aunque el pulso no confirme. El estado
+sigue siendo "vigilancia" y NO se guarda episodio de fatiga (RF05 se mantiene
+para el registro), pero `microsueno=True` en el estado activa el buzzer:
+el pulso cambia en minutos y un microsueño al volante dura segundos.
+
+Calibración personal de la visión: los primeros CALIBRATION_FRAMES frames
+con cara de cada sesión fijan un basal de EAR y de pitch (mediana, robusta a
+parpadeos). Desde ahí "ojos cerrados" es EAR < basal * EAR_CLOSED_FRACTION
+(acotado a [EAR_THRESHOLD_MIN, EAR_THRESHOLD_MAX]) y el cabeceo incluye el
+pitch: |pitch - basal| > basal * PITCH_DEVIATION. Mientras se calibra se usan
+los umbrales fijos de vision.py. La calibración se pierde si la sesión pasa
+IDLE_RESET_SECONDS sin frames o al recalibrar (`reset()`).
+
 Se mantiene un estado por "session_id" (por defecto una sola sesión,
 ya que el prototipo inicial es de un solo usuario). Esto deja abierta
 la extensión a múltiples usuarios/dispositivos en el futuro (RNF05).
 """
 
 from dataclasses import dataclass, field
+import statistics
+import threading
 import time
 
 from .vision import VisionResult
@@ -30,13 +46,29 @@ from .pulse import PulseResult
 
 EYES_CLOSED_SUSTAIN_SECONDS = 2.0   # cuánto tiempo sostenido de ojos cerrados cuenta como señal
 HEAD_TILT_SUSTAIN_SECONDS = 2.0
+YAWN_SUSTAIN_SECONDS = 1.5          # boca abierta sostenida: hablar o cantar no cuenta como bostezo
+MICROSLEEP_SECONDS = 3.0            # ojos cerrados más que esto -> buzzer aunque el pulso no confirme
 SIGNAL_FRESHNESS_SECONDS = 10       # antigüedad máxima de una señal para que cuente en la fusión
+
+# --- Calibración personal de la visión ---
+CALIBRATION_FRAMES = 30             # frames con cara (~10 s a 3 fps) para fijar los basales
+EAR_CLOSED_FRACTION = 0.75          # ojo "cerrado" = EAR por debajo del 75 % del basal
+EAR_THRESHOLD_MIN = 0.15            # cotas del umbral personal de EAR
+EAR_THRESHOLD_MAX = 0.25
+PITCH_DEVIATION = 0.20              # cabeceo frontal = pitch se aleja 20 % del basal
+IDLE_RESET_SECONDS = 600            # 10 min sin frames -> se recalibra la visión
 
 
 @dataclass
 class _SessionState:
     eyes_closed_since: float | None = None
     head_tilted_since: float | None = None
+    yawning_since: float | None = None
+    # Calibración personal de la visión (ver docstring del módulo)
+    ear_samples: list[float] = field(default_factory=list)
+    pitch_samples: list[float] = field(default_factory=list)
+    ear_baseline: float | None = None
+    pitch_baseline: float | None = None
     last_vision: VisionResult | None = None
     last_pulse: PulseResult | None = None
     last_vision_timestamp: float | None = None
@@ -64,15 +96,61 @@ class FatigueEvent:
 class FusionEngine:
     def __init__(self):
         self._sessions: dict[str, _SessionState] = {}
+        # /frame y /pulso corren en el threadpool de FastAPI y pueden tocar la
+        # misma sesión a la vez: todo acceso al estado va bajo este lock.
+        self._lock = threading.RLock()
+
+    def reset(self, session_id: str) -> None:
+        """Olvida la calibración y los temporizadores de la sesión."""
+        with self._lock:
+            self._sessions.pop(session_id, None)
 
     def _state(self, session_id: str) -> _SessionState:
         if session_id not in self._sessions:
             self._sessions[session_id] = _SessionState()
         return self._sessions[session_id]
 
+    @staticmethod
+    def _calibrate(state: _SessionState, result: VisionResult) -> None:
+        """Acumula basales y, si ya existen, reajusta los flags de `result`
+        (se modifica en el sitio: main.py guarda y dibuja los flags ajustados)."""
+        if not result.face_detected or result.ear is None:
+            return
+        if state.ear_baseline is None:
+            state.ear_samples.append(result.ear)
+            if result.pitch_ratio is not None:
+                state.pitch_samples.append(result.pitch_ratio)
+            if len(state.ear_samples) >= CALIBRATION_FRAMES:
+                state.ear_baseline = round(statistics.median(state.ear_samples), 4)
+                if state.pitch_samples:
+                    state.pitch_baseline = round(statistics.median(state.pitch_samples), 4)
+                state.ear_samples.clear()
+                state.pitch_samples.clear()
+            return
+        result.eyes_closed = result.ear < FusionEngine.ear_threshold(state.ear_baseline)
+        if state.pitch_baseline and result.pitch_ratio is not None:
+            if abs(result.pitch_ratio - state.pitch_baseline) > state.pitch_baseline * PITCH_DEVIATION:
+                result.head_tilted = True
+
+    @staticmethod
+    def ear_threshold(ear_baseline: float) -> float:
+        return min(EAR_THRESHOLD_MAX, max(EAR_THRESHOLD_MIN, ear_baseline * EAR_CLOSED_FRACTION))
+
     def update_vision(self, session_id: str, result: VisionResult) -> FatigueEvent | None:
-        state = self._state(session_id)
+        with self._lock:
+            return self._update_vision(session_id, result)
+
+    def _update_vision(self, session_id: str, result: VisionResult) -> FatigueEvent | None:
         now = time.time()
+        old = self._sessions.get(session_id)
+        if (old and old.last_vision_timestamp is not None
+                and now - old.last_vision_timestamp > IDLE_RESET_SECONDS):
+            # Otro trayecto: la calibración visual se vuelve a aprender
+            fresh = _SessionState(last_pulse=old.last_pulse,
+                                  last_pulse_timestamp=old.last_pulse_timestamp)
+            self._sessions[session_id] = fresh
+        state = self._state(session_id)
+        self._calibrate(state, result)
         state.last_vision = result
         state.last_vision_timestamp = now
 
@@ -88,13 +166,20 @@ class FusionEngine:
         else:
             state.head_tilted_since = None
 
+        if result.face_detected and result.yawning:
+            if state.yawning_since is None:
+                state.yawning_since = now
+        else:
+            state.yawning_since = None
+
         return self._evaluate(session_id)
 
     def update_pulse(self, session_id: str, result: PulseResult) -> FatigueEvent | None:
-        state = self._state(session_id)
-        state.last_pulse = result
-        state.last_pulse_timestamp = time.time()
-        return self._evaluate(session_id)
+        with self._lock:
+            state = self._state(session_id)
+            state.last_pulse = result
+            state.last_pulse_timestamp = time.time()
+            return self._evaluate(session_id)
 
     @staticmethod
     def _risk_from_reasons(n_reasons: int) -> str:
@@ -120,7 +205,8 @@ class FusionEngine:
         """Aplica las reglas de umbral + tiempo sostenido usando SOLO las
         señales frescas (dentro de SIGNAL_FRESHNESS_SECONDS).
 
-        Devuelve (visual_signal, physiological_signal, reasons, implausible_reading).
+        Devuelve (visual_signal, physiological_signal, reasons,
+        implausible_reading, microsleep).
         No guarda nada ni construye eventos: lo reutilizan _evaluate()
         (para decidir si hay evento) y get_current_status() (para el
         estado en tiempo real del dashboard).
@@ -144,7 +230,7 @@ class FusionEngine:
             if state.eyes_closed_since and (now - state.eyes_closed_since) >= EYES_CLOSED_SUSTAIN_SECONDS:
                 visual_signal = True
                 reasons.append("ojos cerrados sostenido")
-            if vision.yawning:
+            if state.yawning_since and (now - state.yawning_since) >= YAWN_SUSTAIN_SECONDS:
                 visual_signal = True
                 reasons.append("bostezo detectado")
             if state.head_tilted_since and (now - state.head_tilted_since) >= HEAD_TILT_SUSTAIN_SECONDS:
@@ -160,8 +246,12 @@ class FusionEngine:
                 reasons.append("baja variabilidad de pulso sostenida")
 
         implausible_reading = bool(pulse and pulse.implausible_reading)
+        microsleep = bool(
+            vision and vision.face_detected and state.eyes_closed_since
+            and (now - state.eyes_closed_since) >= MICROSLEEP_SECONDS
+        )
 
-        return visual_signal, physiological_signal, reasons, implausible_reading
+        return visual_signal, physiological_signal, reasons, implausible_reading, microsleep
 
     def _evaluate(self, session_id: str) -> FatigueEvent | None:
         """Decide si hay que GUARDAR un evento nuevo. El estado actual en vivo
@@ -172,7 +262,7 @@ class FusionEngine:
         state = self._state(session_id)
         now = time.time()
 
-        visual_signal, physiological_signal, reasons, implausible = self._analyze(state, now)
+        visual_signal, physiological_signal, reasons, implausible, _ = self._analyze(state, now)
         status, risk_level = self._derive_status(
             visual_signal, physiological_signal, reasons, implausible
         )
@@ -247,10 +337,14 @@ class FusionEngine:
         (fresco o no) para que el usuario vea qué está leyendo el
         sistema, junto con data_is_fresh para saber si es reciente.
         """
+        with self._lock:
+            return self._current_status(session_id)
+
+    def _current_status(self, session_id: str) -> dict:
         state = self._state(session_id)
         now = time.time()
 
-        visual_signal, physiological_signal, reasons, implausible = self._analyze(state, now)
+        visual_signal, physiological_signal, reasons, implausible, microsleep = self._analyze(state, now)
         status, risk_level = self._derive_status(
             visual_signal, physiological_signal, reasons, implausible
         )
@@ -284,6 +378,14 @@ class FusionEngine:
             "eyes_closed": vision.eyes_closed if vision else False,
             "yawning": vision.yawning if vision else False,
             "head_tilted": vision.head_tilted if vision else False,
+            "pitch_ratio": vision.pitch_ratio if vision else None,
+            # Microsueño: el buzzer suena aunque el pulso no confirme (ver docstring)
+            "microsueno": microsleep,
+            # Calibración personal (None mientras se calibra)
+            "ear_basal": state.ear_baseline,
+            "ear_umbral": (self.ear_threshold(state.ear_baseline)
+                           if state.ear_baseline is not None else None),
+            "pitch_basal": state.pitch_baseline,
             "bpm_mean": pulse.bpm_mean if pulse else None,
             "bpm_median": pulse.bpm_median if pulse else None,
             "bpm_std": pulse.bpm_std if pulse else None,
