@@ -184,6 +184,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   Pill('${u['role_label']}', color: c),
                   Pill(activo ? 'Activo' : 'Inactivo', color: activo ? C.verde : C.gris),
                   if (u['must_change_password'] == true) const Pill('clave temporal', color: C.ambar),
+                  if (u['rostro_registrado'] == true) const Pill('rostro registrado', color: C.violeta),
                   Text(
                     'Último acceso: ${_lastLogin(u['last_login'])}',
                     style: const TextStyle(color: C.muted, fontSize: 11),
@@ -232,6 +233,24 @@ class _UsersScreenState extends State<UsersScreen> {
                 );
               },
             ),
+            if (u['rostro_registrado'] == true)
+              ListTile(
+                leading: const Icon(Icons.face_retouching_off),
+                title: const Text('Borrar registro facial'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirm(
+                    'Borrar registro facial',
+                    'Se borrarán los datos biométricos de @${u['username']}. Al entrar a la app se le pedirá registrar su rostro de nuevo.',
+                    'Borrar',
+                    () async {
+                      await _app.api.deleteJson('/api/usuarios/${u['id']}/rostro');
+                      if (mounted) showSnack(context, 'Registro facial de @${u['username']} borrado');
+                      _load();
+                    },
+                  );
+                },
+              ),
             if (!isMe)
               ListTile(
                 leading: Icon(activo ? Icons.block : Icons.check_circle_outline, color: activo ? C.rojo : C.verde),

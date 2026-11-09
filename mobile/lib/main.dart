@@ -12,6 +12,7 @@ import 'app_state.dart';
 import 'notifications.dart';
 import 'screens/change_password_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/identity_screen.dart';
 import 'screens/login_screen.dart';
 import 'theme.dart';
 import 'widgets/brand.dart';
@@ -70,6 +71,10 @@ class _Gate extends StatelessWidget {
       return ('login', const LoginScreen());
     }
     if (app.mustChangePassword) return ('clave', const ChangePasswordScreen(forced: true));
+    // verificación facial al entrar: registro la primera vez, luego verificación
+    if (app.identityNeed != null && !app.identityPostponed) {
+      return ('identidad-${app.identityNeed}', IdentityScreen(mode: app.identityNeed!));
+    }
     // la clave cambia con el usuario: al reentrar se crea un panel nuevo
     final id = app.user!['id'];
     return ('home-$id', HomeScreen(key: ValueKey('home-$id')));

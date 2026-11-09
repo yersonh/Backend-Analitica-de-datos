@@ -42,6 +42,14 @@ class AppState extends ChangeNotifier {
   String? sessionId;
   bool soundOn = false;
 
+  /// Verificación facial (GET /api/identidad). `identityNeed` es 'registro' o
+  /// 'verificacion' cuando la app debe pedirlo al entrar; null si no hace falta.
+  Map<String, dynamic>? identity;
+  String? identityNeed;
+
+  /// El conductor eligió "Ahora no": no se le vuelve a pedir hasta el próximo login.
+  bool identityPostponed = false;
+
   /// Mensaje para la pantalla de login (sesión expirada, sin red al arrancar...).
   String? notice;
 
@@ -104,6 +112,7 @@ class AppState extends ChangeNotifier {
     await _storeToken(r);
     await _rememberUser(username);
     sessionId = null; // cada login vuelve a elegir la sesión por defecto
+    identityPostponed = false;
     await _loadProfile();
     notice = null;
     notifyListeners();
@@ -156,7 +165,37 @@ class AppState extends ChangeNotifier {
     user = await api.getJson('/api/yo');
     mustChangePassword = user!['must_change_password'] == true;
     config = await api.getJson('/api/config');
-    if (!mustChangePassword) await _resolveSession();
+    if (!mustChangePassword) {
+      await _resolveSession();
+      await refreshIdentity();
+    }
+  }
+
+  /// Consulta si el conductor debe registrar o verificar su rostro.
+  Future<void> refreshIdentity() async {
+    try {
+      identity = await api.getJson('/api/identidad');
+      identityNeed = identity?['necesita'] as String?;
+    } on UnauthorizedException {
+      rethrow;
+    } catch (_) {
+      // sin red o servidor viejo: no se bloquea la app por esto
+      identity = null;
+      identityNeed = null;
+    }
+    notifyListeners();
+  }
+
+  /// Tras registrar o verificar con éxito.
+  void identityDone(Map<String, dynamic>? info) {
+    identityNeed = null;
+    if (info != null) identity = {...?identity, ...info};
+    notifyListeners();
+  }
+
+  void postponeIdentity() {
+    identityPostponed = true;
+    notifyListeners();
   }
 
   /// Igual que el panel web: un conductor ve siempre su sesión; un supervisor
@@ -189,6 +228,8 @@ class AppState extends ChangeNotifier {
     config = null;
     mustChangePassword = false;
     sessionId = null;
+    identity = null;
+    identityNeed = null;
     await _prefs.remove('session_id');
     await _secure.delete(key: 'token');
   }

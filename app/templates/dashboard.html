@@ -496,6 +496,13 @@
         .wake-btn:disabled { opacity: 0.5; cursor: default; }
         .recal-btn { margin-left: auto; padding: 5px 11px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: var(--violeta); font: inherit; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
         .recal-btn:disabled { opacity: 0.5; cursor: default; }
+        .identity-card { display: flex; align-items: center; gap: 14px; --c: var(--ambar); }
+        .identity-card[data-e="verificado"] { --c: var(--verde); }
+        .identity-card[data-e="no_coincide"] { --c: var(--rojo); }
+        .identity-card[data-e="sin_registro"] { --c: var(--muted); }
+        .identity-card svg { width: 26px; height: 26px; flex: none; color: var(--c); }
+        .identity-card .txt b { display: block; font-size: 0.92rem; color: var(--c); }
+        .identity-card .txt span { font-size: 0.8rem; color: var(--muted); }
         .buzzer-card { display: flex; align-items: center; gap: 14px; --c: var(--muted); }
         .buzzer-card.on { --c: var(--rojo); }
         .buzzer-card svg { width: 26px; height: 26px; flex: none; color: var(--c); }
@@ -903,6 +910,11 @@
 
             <!-- ===== Fusión ===== -->
             <!-- ===== Buzzer ===== -->
+            <section class="glass pad span-12 identity-card" id="identity-card" style="display:none">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+                <div class="txt"><b id="identity-title"></b><span id="identity-text"></span></div>
+            </section>
+
             <section class="glass pad span-12 buzzer-card" id="buzzer-card" style="display:none">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 0 0 3.4 0"/></svg>
                 <div class="txt"><b>Buzzer del dispositivo</b><span id="buzzer-text"></span></div>
@@ -1461,6 +1473,7 @@
             $("scan-tag").textContent = s.face_detected === false ? "BUSCANDO ROSTRO…" : (s.ear != null ? `APERTURA ${Math.round(clamp(s.ear / 0.32, 0, 1) * 100)}%` : "APERTURA —");
             setCamera(!!s.camara_activa);
             applyBuzzer(s);
+            applyIdentity(s);
 
             // pulso
             const bpm = s.bpm;
@@ -1796,6 +1809,23 @@
             catch (err) { console.error("No se pudo actualizar el historial", err); }
         }
         // ---------- Buzzer ----------
+        // ---------- Verificación facial del conductor ----------
+        const IDENTIDAD = {
+            verificado: ["Identidad verificada", "El rostro frente a la cámara es el del conductor de esta sesión."],
+            no_coincide: ["Identidad no coincide", "La persona frente a la cámara no es el conductor de esta sesión: sus lecturas se descartan."],
+            sin_registro: ["Sin registro facial", "El conductor no ha registrado su rostro (se hace desde la app): los datos se guardan sin verificar quién es."],
+            pendiente: ["Esperando reconocer al conductor", "Mientras la cámara no reconozca su rostro, las lecturas de esta sesión no se guardan."],
+            vencida: ["Esperando reconocer al conductor", "Hace rato la cámara no reconoce al conductor: las lecturas de esta sesión no se guardan."],
+        };
+        function applyIdentity(s) {
+            const card = $("identity-card"), id = s.identidad || {};
+            const info = IDENTIDAD[id.estado];
+            card.style.display = SESSION !== "todas" && info ? "" : "none";
+            if (!info) return;
+            card.dataset.e = id.estado;
+            $("identity-title").textContent = info[0];
+            $("identity-text").textContent = info[1];
+        }
         function applyBuzzer(s) {
             const card = $("buzzer-card");
             const on = !!s.buzzer;

@@ -38,6 +38,7 @@ class LiveScreen extends StatelessWidget {
                   child: Text(live.error!, style: const TextStyle(color: C.rojo)),
                 ),
               _Hero(s: s, st: st, keyName: key),
+              if (app.sessionId != 'todas') _IdentityCard(s: s),
               if (app.can('todas_sesiones') || s['buzzer'] == true) _BuzzerCard(s: s, app: app),
               if (app.sessionId != 'todas' && (ownSession || app.can('todas_sesiones')))
                 CameraSourceCard(
@@ -625,6 +626,48 @@ class _Kpis extends StatelessWidget {
 /// Buzzer del dispositivo del conductor: suena solo con fatiga confirmada y un
 /// supervisor puede hacerlo sonar para despertarlo. El ESP32 lo recibe en su
 /// siguiente envío de pulso (cada ~2 s).
+/// Estado de la verificación facial de la sesión (`identidad` en /estado).
+class _IdentityCard extends StatelessWidget {
+  const _IdentityCard({required this.s});
+  final Map<String, dynamic> s;
+
+  @override
+  Widget build(BuildContext context) {
+    final id = (s['identidad'] as Map?)?.cast<String, dynamic>();
+    final estado = id?['estado'] as String?;
+    if (id == null || estado == 'deshabilitada') return const SizedBox.shrink();
+    final (Color color, IconData icon, String title, String text) = switch (estado) {
+      'verificado' => (C.verde, Icons.verified_user, 'Identidad verificada',
+          'El rostro frente a la cámara es el del conductor de esta sesión.'),
+      'no_coincide' => (C.rojo, Icons.gpp_bad_outlined, 'Identidad no coincide',
+          'La persona frente a la cámara no es el conductor de esta sesión: sus lecturas se descartan.'),
+      'sin_registro' => (C.gris, Icons.face_retouching_off, 'Sin registro facial',
+          'El conductor no ha registrado su rostro: los datos se guardan sin verificar quién es.'),
+      _ => (C.ambar, Icons.face_outlined, 'Esperando reconocer al conductor',
+          'Mientras la cámara no reconozca su rostro, las lecturas de esta sesión no se guardan.'),
+    };
+    return GlassCard(
+      accent: estado == 'verificado' || estado == 'sin_registro' ? null : color,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: color)),
+                const SizedBox(height: 2),
+                Text(text, style: const TextStyle(color: C.muted, fontSize: 12.5)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BuzzerCard extends StatefulWidget {
   const _BuzzerCard({required this.s, required this.app});
   final Map<String, dynamic> s;

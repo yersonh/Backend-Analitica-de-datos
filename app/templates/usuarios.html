@@ -61,6 +61,7 @@
         .status { display: inline-flex; align-items: center; gap: 7px; font-size: 0.82rem; }
         .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--verde); box-shadow: 0 0 8px var(--verde); }
         .status.off::before { background: var(--gris); box-shadow: none; }
+        .tag-face { display: inline-block; margin-left: 6px; font-size: 0.66rem; padding: 2px 7px; border-radius: 6px; background: rgba(155,122,216,0.14); color: #5b3fa0; border: 1px solid rgba(155,122,216,0.35); }
         .tag-temp { display: inline-block; margin-left: 6px; font-size: 0.66rem; padding: 2px 7px; border-radius: 6px; background: rgba(251,191,36,0.14); color: #8a5a00; border: 1px solid rgba(251,191,36,0.35); }
         .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
         .icon-btn { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--line); background: rgba(108, 111, 214,0.06); color: var(--ink-2); cursor: pointer; transition: all 0.2s; }
@@ -299,6 +300,7 @@
         edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
         key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M21 2l-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>',
         off: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/></svg>',
+        face: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15c1.7 1.3 4.3 1.3 6 0M4 4l16 16"/></svg>',
         on: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',
     };
 
@@ -312,11 +314,12 @@
                     <div><b>${esc(u.full_name || u.username)}${u.id === ME ? '<span class="you">TÚ</span>' : ""}</b><span>@${esc(u.username)}</span></div></div></td>
                 <td><span class="role-badge r-${esc(u.role)}">${esc(u.role_label)}</span></td>
                 <td>${u.session_id ? `<span class="mono">${esc(u.session_id)}</span>` : '<span class="muted">Todas</span>'}</td>
-                <td><span class="status ${u.active ? "" : "off"}">${u.active ? "Activo" : "Inactivo"}</span>${u.must_change_password ? '<span class="tag-temp" title="Debe cambiar la contraseña al entrar">clave temporal</span>' : ""}</td>
+                <td><span class="status ${u.active ? "" : "off"}">${u.active ? "Activo" : "Inactivo"}</span>${u.must_change_password ? '<span class="tag-temp" title="Debe cambiar la contraseña al entrar">clave temporal</span>' : ""}${u.rostro_registrado ? '<span class="tag-face" title="Tiene registro facial: sus datos solo se aceptan si la cámara lo reconoce">rostro</span>' : ""}</td>
                 <td class="hide-sm">${relTime(u.last_login)}</td>
                 <td><div class="row-actions">
                     <button class="icon-btn" title="Editar" aria-label="Editar" data-act="edit" data-id="${u.id}">${ICON.edit}</button>
                     <button class="icon-btn" title="Restablecer contraseña" aria-label="Restablecer contraseña" data-act="reset" data-id="${u.id}">${ICON.key}</button>
+                    ${u.rostro_registrado ? `<button class="icon-btn danger" title="Borrar registro facial" aria-label="Borrar registro facial" data-act="face" data-id="${u.id}">${ICON.face}</button>` : ""}
                     <button class="icon-btn ${u.active ? "danger" : "good"}" title="${u.active ? "Desactivar" : "Activar"}" aria-label="${u.active ? "Desactivar" : "Activar"}" data-act="toggle" data-id="${u.id}" ${u.id === ME ? "disabled" : ""}>${u.active ? ICON.off : ICON.on}</button>
                 </div></td>
             </tr>`).join("") : `<tr><td colspan="6" class="empty">${users.length ? "Ningún usuario coincide con la búsqueda." : "Aún no hay usuarios."}</td></tr>`;
@@ -422,6 +425,9 @@
         if (b.dataset.act === "reset") confirmDo("Restablecer contraseña",
             `Se generará una contraseña temporal para @${u.username} y se cerrarán sus sesiones abiertas.`, "Restablecer",
             async () => { const r = await api(`/api/usuarios/${u.id}/clave`, { method: "POST", body: "{}" }); showSecret(u, r.password_temporal); load(); });
+        if (b.dataset.act === "face") confirmDo("Borrar registro facial",
+            `Se borrarán los datos biométricos de @${u.username}. Al entrar a la app se le pedirá registrar su rostro de nuevo.`, "Borrar",
+            async () => { await api(`/api/usuarios/${u.id}/rostro`, { method: "DELETE" }); toast(`Registro facial de @${u.username} borrado`); load(); });
         if (b.dataset.act === "toggle") {
             const act = !u.active;
             const run = async () => { await api(`/api/usuarios/${u.id}`, { method: "PATCH", body: JSON.stringify({ active: act }) }); toast(act ? `@${u.username} activado` : `@${u.username} desactivado`); load(); };
