@@ -266,3 +266,43 @@ def test_supervisor_sin_sesion_propia(client, admin):
     assert client.get("/api/identidad", headers=admin).json() == {"aplica": False}
     r = client.post("/api/identidad/verificar", headers=admin, files={"file": ("f.png", jpeg(ANA), "image/png")})
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Web: Perfil > Mi rostro (/cuenta/rostro), con la cookie de sesión
+# ---------------------------------------------------------------------------
+
+def web_login(client, username, password):
+    c = TestClient(client.app, base_url="http://testserver")
+    r = c.post("/login", data={"username": username, "password": password}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    return c
+
+
+def test_web_pagina_mi_rostro(client, conductor):
+    web = web_login(client, "ana", "Conductora-456")
+    r = web.get("/cuenta/rostro", headers={"Accept": "text/html"})
+    assert r.status_code == 200 and "Mi rostro" in r.text and "ruta_ana" in r.text
+    # el menú de perfil del panel enlaza la página
+    assert '<a href="/cuenta/rostro" role="menuitem"' in web.get("/", headers={"Accept": "text/html"}).text
+
+
+def test_web_registro_con_cookie_mismo_origen(client, conductor):
+    web = web_login(client, "ana", "Conductora-456")
+    files = [("files", (f"{i}.jpg", jpeg(ANA, i * 10), "image/jpeg")) for i in range(3)]
+    # el navegador envía Origin del mismo sitio: la defensa CSRF lo deja pasar
+    r = web.post("/api/identidad/registro", files=files, data={"consentimiento": "true"},
+                 headers={"Origin": "http://testserver"})
+    assert r.status_code == 200, r.text
+    # desde otro origen se rechaza
+    r = web.post("/api/identidad/registro", files=files, data={"consentimiento": "true"},
+                 headers={"Origin": "http://otro-sitio.example"})
+    assert r.status_code == 403
+    assert web.delete("/api/identidad/registro", headers={"Origin": "http://testserver"}).json()["borrado"] is True
+
+
+def test_web_mi_rostro_sin_sesion_propia(client, admin):
+    web = web_login(client, "admin", "Admin-prueba-123")
+    r = web.get("/cuenta/rostro", headers={"Accept": "text/html"})
+    assert r.status_code == 200 and "sesión propia" in r.text
+    assert '<a href="/cuenta/rostro" role="menuitem"' not in web.get("/", headers={"Accept": "text/html"}).text

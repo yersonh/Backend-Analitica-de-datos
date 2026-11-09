@@ -1,0 +1,229 @@
+{% extends "_base.html" %}
+{% block title %}SIDFAM — Mi rostro{% endblock %}
+
+{% block styles %}
+        .wrap { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; }
+        .card { width: min(560px, 100%); padding: 30px 28px 26px; animation: fadeUp 0.7s both; display: grid; gap: 18px; }
+        .head { display: flex; align-items: center; gap: 14px; }
+        .head .ico { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; color: var(--violeta); background: rgba(155, 122, 216, 0.12); border: 1px solid rgba(155, 122, 216, 0.3); flex: none; }
+        .head .ico svg { width: 24px; height: 24px; }
+        .head h1 { margin: 0; font-size: 1.4rem; }
+        .head .who { font-size: 0.82rem; color: var(--muted); margin-top: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .lead { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+        .status { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.5); --c: var(--muted); }
+        .status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); flex: none; }
+        .status b { display: block; font-size: 0.92rem; color: var(--c); }
+        .status span { font-size: 0.8rem; color: var(--muted); }
+        .status[data-e="verificado"] { --c: var(--verde); }
+        .status[data-e="no_coincide"] { --c: var(--rojo); }
+        .status[data-e="pendiente"], .status[data-e="vencida"] { --c: var(--ambar); }
+        .consent { padding: 14px; border-radius: 14px; background: rgba(155, 122, 216, 0.08); border: 1px solid rgba(155, 122, 216, 0.3); font-size: 0.84rem; line-height: 1.5; }
+        .consent b { display: block; margin-bottom: 6px; }
+        .consent label { display: flex; gap: 9px; align-items: center; margin-top: 10px; font-weight: 600; cursor: pointer; }
+        .consent input { width: 18px; height: 18px; accent-color: var(--violeta); }
+        .cam { position: relative; border-radius: 18px; overflow: hidden; background: #1b1e3f; aspect-ratio: 4 / 3; }
+        .cam video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+        .cam .guide { position: absolute; left: 50%; top: 50%; width: 46%; height: 72%; transform: translate(-50%, -50%); border: 3px solid rgba(255, 255, 255, 0.85); border-radius: 50%; pointer-events: none; }
+        .cam .msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center; color: #fff; font-size: 0.9rem; }
+        .shots { display: flex; gap: 8px; justify-content: center; }
+        .shots i { width: 34px; height: 6px; border-radius: 6px; background: rgba(108, 111, 214, 0.15); transition: background 0.3s; }
+        .shots i.done { background: var(--violeta); }
+        .pose { text-align: center; font-weight: 600; min-height: 1.3em; }
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .actions .btn { flex: 1; min-width: 150px; }
+        .note { font-size: 0.78rem; color: var(--muted); line-height: 1.45; margin: 0; }
+        [hidden] { display: none !important; }
+{% endblock %}
+
+{% block content %}
+<main class="wrap">
+    <section class="glass card">
+        <div class="head">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15c1.7 1.3 4.3 1.3 6 0"/></svg></div>
+            <div>
+                <h1>Mi rostro</h1>
+                <div class="who">{{ user.display_name }} <span class="role-badge r-{{ user.role }}">{{ user.role_label }}</span>{% if user.session_id %} · sesión <b>{{ user.session_id }}</b>{% endif %}</div>
+            </div>
+        </div>
+
+        {% if not user.session_id %}
+        <div class="alert info"><span>La verificación facial es para cuentas con una sesión propia (conductores). Tu cuenta ve todas las sesiones.</span></div>
+        <div class="actions"><a class="btn btn-ghost" href="/">Volver al panel</a></div>
+        {% else %}
+        <p class="lead">SIDFAM comprueba que quien está frente a la cámara eres tú, para que tus datos no se mezclen con los de otra persona. Registras tu rostro una vez; después la cámara te reconoce sola.</p>
+
+        <div class="status" id="status" data-e="">
+            <span class="dot"></span>
+            <div><b id="status-title">Cargando…</b><span id="status-text"></span></div>
+        </div>
+
+        <div id="alert" class="alert" role="alert" hidden><span id="alert-text"></span></div>
+
+        <div class="consent" id="consent" hidden>
+            <b>Datos biométricos</b>
+            <span id="consent-text"></span>
+            <label><input type="checkbox" id="consent-check"> Acepto</label>
+        </div>
+
+        <div id="capture" hidden>
+            <div class="cam">
+                <video id="video" autoplay playsinline muted></video>
+                <div class="guide" aria-hidden="true"></div>
+                <div class="msg" id="cam-msg">Abriendo la cámara…</div>
+            </div>
+            <div class="shots" id="shots" style="margin-top:12px"></div>
+            <div class="pose" id="pose" style="margin-top:8px"></div>
+        </div>
+
+        <div class="actions" id="actions"></div>
+        <p class="note">Solo se guardan vectores numéricos de tu rostro, nunca las fotos (Ley 1581 de 2012). Puedes borrarlos cuando quieras desde esta página.</p>
+        <div class="actions"><a class="btn btn-ghost" href="/">Volver al panel</a></div>
+        {% endif %}
+    </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+{% if user.session_id %}
+<script>
+    (() => {
+        const $ = (id) => document.getElementById(id);
+        const POSES = ["Mira de frente a la cámara", "Gira la cara un poco a tu izquierda", "Gira la cara un poco a tu derecha",
+                       "Inclina la cara un poco hacia abajo", "Vuelve a mirar de frente"];
+        const ESTADOS = {
+            verificado: ["Identidad verificada", "La cámara te reconoce: tus datos se guardan."],
+            no_coincide: ["Identidad no coincide", "La última foto no coincidió con tu registro: tus lecturas se descartan hasta que la cámara te reconozca."],
+            pendiente: ["Registrado, sin verificar", "Verifica ahora o espera a que la cámara te reconozca: mientras tanto tus lecturas no se guardan."],
+            vencida: ["Registrado, sin verificar", "Hace rato la cámara no te reconoce: verifica ahora."],
+            sin_registro: ["Sin registro facial", "Tus datos se guardan sin verificar quién está frente a la cámara."],
+            deshabilitada: ["Verificación no disponible", "El servidor no tiene activa la verificación facial."],
+        };
+        let info = null, mode = null, shots = [], stream = null, busy = false;
+
+        async function api(url, opts = {}) {
+            const r = await fetch(url, opts);
+            if (r.status === 401) { location.href = "/login?next=/cuenta/rostro"; throw new Error("Sesión expirada"); }
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.detail || `Error ${r.status}`);
+            return data;
+        }
+        function showAlert(text, ok = false) {
+            const a = $("alert");
+            a.hidden = !text; a.className = "alert" + (ok ? " ok" : "");
+            $("alert-text").textContent = text || "";
+        }
+        function btn(label, cls, fn, disabled = false) {
+            const b = document.createElement("button");
+            b.type = "button"; b.className = "btn " + cls; b.textContent = label; b.disabled = disabled;
+            b.addEventListener("click", fn);
+            return b;
+        }
+
+        async function load() {
+            info = await api("/api/identidad");
+            const st = info.estado || {};
+            const e = info.habilitada === false ? "deshabilitada" : (info.registrado ? st.estado : "sin_registro");
+            const [t, d] = ESTADOS[e] || ["—", ""];
+            $("status").dataset.e = e;
+            $("status-title").textContent = t;
+            $("status-text").textContent = d + (info.registrado_en ? ` Registrado el ${new Date(info.registrado_en).toLocaleDateString("es-CO")}.` : "");
+            $("consent-text").textContent = info.consentimiento || "";
+            renderActions();
+        }
+
+        function renderActions() {
+            const box = $("actions"); box.innerHTML = "";
+            $("consent").hidden = mode !== "registro";
+            $("capture").hidden = !mode;
+            if (info.habilitada === false) return;
+            if (!mode) {
+                if (!info.registrado) {
+                    box.append(btn("Registrar mi rostro", "btn-primary", () => start("registro")));
+                } else {
+                    box.append(btn("Verificar ahora", "btn-primary", () => start("verificacion")));
+                    box.append(btn("Rehacer registro", "btn-ghost", () => start("registro")));
+                    box.append(btn("Borrar mis datos biométricos", "btn-danger", removeEnrollment));
+                }
+                return;
+            }
+            const need = mode === "registro" ? (info.fotos_min || 3) : 1;
+            $("shots").innerHTML = mode === "registro" ? Array.from({ length: need }, (_, i) => `<i class="${i < shots.length ? "done" : ""}"></i>`).join("") : "";
+            $("pose").textContent = mode === "registro"
+                ? ($("consent-check").checked ? `Foto ${shots.length + 1} de ${need}: ${POSES[Math.min(shots.length, POSES.length - 1)]}` : "Acepta el tratamiento de datos para continuar.")
+                : "Mira de frente a la cámara";
+            const canShoot = !!stream && !busy && (mode !== "registro" || $("consent-check").checked);
+            box.append(btn(busy ? "Enviando…" : (mode === "registro" ? "Tomar foto" : "Verificar"), "btn-primary", shoot, !canShoot));
+            box.append(btn("Cancelar", "btn-ghost", stop, busy));
+        }
+
+        async function start(m) {
+            mode = m; shots = []; showAlert("");
+            renderActions();
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+                $("video").srcObject = stream;
+                $("cam-msg").hidden = true;
+            } catch (err) {
+                $("cam-msg").hidden = false;
+                $("cam-msg").textContent = window.isSecureContext
+                    ? "No se pudo abrir la cámara. Revisa que el navegador tenga permiso."
+                    : "La cámara solo funciona con HTTPS o en localhost.";
+            }
+            renderActions();
+        }
+
+        function stop() {
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            stream = null; mode = null; shots = [];
+            $("video").srcObject = null; $("cam-msg").hidden = false; $("cam-msg").textContent = "Abriendo la cámara…";
+            renderActions();
+        }
+
+        function frameBlob() {
+            const v = $("video"), c = document.createElement("canvas");
+            c.width = v.videoWidth; c.height = v.videoHeight;
+            c.getContext("2d").drawImage(v, 0, 0);
+            return new Promise((res) => c.toBlob(res, "image/jpeg", 0.9));
+        }
+
+        async function shoot() {
+            if (!stream || busy) return;
+            showAlert("");
+            const blob = await frameBlob();
+            if (mode === "verificacion") return send(async () => {
+                const fd = new FormData(); fd.append("file", blob, "verificar.jpg");
+                const r = await api("/api/identidad/verificar", { method: "POST", body: fd });
+                if (r.coincide) { stop(); showAlert("Identidad verificada.", true); }
+                else showAlert("No coincide con tu registro. Intenta con buena luz, mirando de frente.");
+            });
+            shots.push(blob);
+            if (shots.length < (info.fotos_min || 3)) return renderActions();
+            await send(async () => {
+                const fd = new FormData();
+                shots.forEach((b, i) => fd.append("files", b, `foto_${i}.jpg`));
+                fd.append("consentimiento", "true");
+                await api("/api/identidad/registro", { method: "POST", body: fd });
+                stop(); showAlert("Rostro registrado. Tu sesión quedó verificada.", true);
+            }, () => { shots = []; });
+        }
+
+        async function send(fn, onError) {
+            busy = true; renderActions();
+            try { await fn(); await load(); }
+            catch (err) { onError?.(); showAlert(err.message); }
+            finally { busy = false; renderActions(); }
+        }
+
+        async function removeEnrollment() {
+            if (!confirm("¿Borrar tus datos biométricos? Tus lecturas dejarán de verificarse por rostro.")) return;
+            try { await api("/api/identidad/registro", { method: "DELETE" }); showAlert("Se borraron tus datos biométricos.", true); await load(); }
+            catch (err) { showAlert(err.message); }
+        }
+
+        $("consent-check").addEventListener("change", renderActions);
+        addEventListener("pagehide", () => stream && stream.getTracks().forEach(t => t.stop()));
+        load().catch(err => showAlert(err.message));
+    })();
+</script>
+{% endif %}
+{% endblock %}

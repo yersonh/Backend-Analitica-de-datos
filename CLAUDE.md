@@ -164,8 +164,11 @@ banner. Sessions without an enrolled driver behave as before. Endpoints:
 App: `screens/identity_screen.dart` is shown by `_Gate` in `main.dart` while
 `AppState.identityNeed` is set (not blocking: "Ahora no" → `identityPostponed`
 until next login); "Mi rostro" in the account menu redoes/deletes it; live screen
-`_IdentityCard`. Web: `identity-card` in the dashboard, face tag/action in
-`usuarios.html`. Tests use a fake identifier (`tests/test_identity.py`).
+`_IdentityCard`. Web: profile menu → **Mi rostro** (`GET /cuenta/rostro`,
+`rostro.html`, only for users with their own `session_id`; getUserMedia + canvas
+JPEG, then the same `/api/identidad/*` endpoints with the cookie, so the
+same-origin CSRF check applies), `identity-card` in the dashboard (with a shortcut
+to that page on the own session), face tag/action in `usuarios.html`. Tests use a fake identifier (`tests/test_identity.py`).
 
 **`app/database.py`** — dual backend, chosen at import time: **PostgreSQL** (via
 `psycopg2`) when `DATABASE_URL` is set (Railway injects it), else **SQLite** at

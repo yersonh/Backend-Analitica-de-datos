@@ -800,6 +800,9 @@
                     {% if "usuarios" in perms %}
                     <a href="/usuarios" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M17 11l2 2 4-4"/></svg>Usuarios y roles</a>
                     {% endif %}
+                    {% if user.session_id %}
+                    <a href="/cuenta/rostro" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15c1.7 1.3 4.3 1.3 6 0"/></svg>Mi rostro</a>
+                    {% endif %}
                     <a href="/cuenta/clave" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Cambiar contraseña</a>
                     <form method="post" action="/logout"><button type="submit" class="danger" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Cerrar sesión</button></form>
                 </div>
@@ -913,6 +916,7 @@
             <section class="glass pad span-12 identity-card" id="identity-card" style="display:none">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
                 <div class="txt"><b id="identity-title"></b><span id="identity-text"></span></div>
+                <a class="recal-btn" id="identity-link" href="/cuenta/rostro" style="display:none;text-decoration:none">Mi rostro</a>
             </section>
 
             <section class="glass pad span-12 buzzer-card" id="buzzer-card" style="display:none">
@@ -1107,6 +1111,7 @@
     <script>
     (() => {
         const SESSION = {{ session_id | tojson }};
+        const MY_SESSION = {{ user.session_id | tojson }};
         const THR = {{ thresholds | tojson }};
         const MESH = {{ mesh_contours | tojson }};
         const CAN_FLEET = {{ ("todas_sesiones" in perms) | tojson }};
@@ -1810,6 +1815,7 @@
         }
         // ---------- Buzzer ----------
         // ---------- Verificación facial del conductor ----------
+        // (registro y verificación desde la web: Perfil > Mi rostro, /cuenta/rostro)
         const IDENTIDAD = {
             verificado: ["Identidad verificada", "El rostro frente a la cámara es el del conductor de esta sesión."],
             no_coincide: ["Identidad no coincide", "La persona frente a la cámara no es el conductor de esta sesión: sus lecturas se descartan."],
@@ -1825,6 +1831,10 @@
             card.dataset.e = id.estado;
             $("identity-title").textContent = info[0];
             $("identity-text").textContent = info[1];
+            // en la sesión propia, atajo a Perfil > Mi rostro para registrarse o verificarse
+            const own = MY_SESSION && SESSION === MY_SESSION;
+            $("identity-link").style.display = own && id.estado !== "verificado" ? "" : "none";
+            $("identity-link").textContent = id.estado === "sin_registro" ? "Registrar mi rostro" : "Verificar";
         }
         function applyBuzzer(s) {
             const card = $("buzzer-card");

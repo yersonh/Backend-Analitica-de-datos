@@ -41,6 +41,7 @@ Acceso (ver app/auth.py para los roles y permisos):
   GET/POST /login              -> inicio de sesión.
   POST /logout                 -> cierra la sesión.
   GET/POST /cuenta/clave       -> cambio de la contraseña propia.
+  GET  /cuenta/rostro          -> registro/verificación facial propios (perfil, web).
   GET  /usuarios               -> gestión de usuarios (solo administrador).
   /api/usuarios...             -> API JSON de esa gestión.
 
@@ -753,6 +754,13 @@ def logout():
 def password_page(request: Request, user: User = Depends(require(allow_password_change=True))):
     return templates.TemplateResponse(request, "cambiar_clave.html", {
         "user": user, "error": None, "min_password": auth.MIN_PASSWORD_LENGTH})
+
+
+@app.get("/cuenta/rostro", response_class=HTMLResponse)
+def face_page(request: Request, user: User = Depends(require("panel"))):
+    """Perfil > Mi rostro: el usuario registra, verifica o borra su rostro desde la
+    web con la cámara del computador (mismos endpoints /api/identidad que la app)."""
+    return templates.TemplateResponse(request, "rostro.html", {"user": user})
 
 
 def _apply_password_change(user: User, actual: str, nueva: str, confirmar: str) -> tuple[str | None, int]:

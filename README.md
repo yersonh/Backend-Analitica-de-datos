@@ -71,11 +71,15 @@ Para que los datos de una sesión sean solo de su conductor, SIDFAM compara
 el rostro frente a la cámara con el registrado por el dueño de la sesión
 (`app/identity.py`, modelos YuNet + SFace de OpenCV):
 
-1. **Registro (una vez, en la app):** al entrar, el conductor acepta el
-   tratamiento de sus datos biométricos y se toma 3 fotos guiadas. Solo se
+1. **Registro (una vez):** en la app (se pide al entrar) o en la web, desde
+   el menú de perfil → **Mi rostro** (`/cuenta/rostro`, con la cámara del
+   computador; requiere HTTPS o localhost). El conductor acepta el
+   tratamiento de sus datos biométricos y se toma 3 fotos guiadas. Sirve para
+   conductores que ya existen: no hay que crear cuentas nuevas. Solo se
    guardan vectores numéricos del rostro (tabla `face_enrollments`), nunca
    las fotos, junto con la fecha del consentimiento.
-2. **Al entrar:** la app pide una foto y la compara con el registro.
+2. **Al entrar:** la app pide una foto y la compara con el registro (en la
+   web, *Mi rostro* → *Verificar ahora*).
 3. **Durante el monitoreo:** cada frame (ESP32-CAM o celular) se revisa
    cada 5 s (cada 1 s mientras no esté verificada).
 
@@ -89,7 +93,7 @@ sin conductor registrado funcionan como antes (estado `sin_registro`).
 El estado está en `/estado` → `identidad` (`verificado`, `pendiente`,
 `vencida`, `no_coincide`, `sin_registro`, `deshabilitada`) y se ve en el
 panel y en la app. El conductor puede rehacer o **borrar** su registro desde
-*Mi rostro* en la app; el administrador, desde *Usuarios y roles*.
+*Mi rostro* (app o web); el administrador, desde *Usuarios y roles*.
 
 **Modelos:** el Dockerfile los descarga al construir (~40 MB, no van en git).
 En local: `python scripts/descargar_modelos.py`. Sin ellos, la verificación
