@@ -65,6 +65,41 @@ Variables de entorno (en Railway, en *Variables* del servicio):
 | `DEVICE_API_KEY` | Clave que deben enviar los ESP32 en `X-Device-Key`. Si no se define, `/frame` y `/pulso` aceptan datos de cualquiera (solo para desarrollo local; si falta en producción, con `DATABASE_URL` definida, el arranque lo registra como error). Pon el mismo valor en `DEVICE_API_KEY` de los dos `.ino` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Opcional: credenciales del primer administrador en lugar de la contraseña temporal generada |
 
+### Verificación facial del conductor
+
+Para que los datos de una sesión sean solo de su conductor, SIDFAM compara
+el rostro frente a la cámara con el registrado por el dueño de la sesión
+(`app/identity.py`, modelos YuNet + SFace de OpenCV):
+
+1. **Registro (una vez, en la app):** al entrar, el conductor acepta el
+   tratamiento de sus datos biométricos y se toma 3 fotos guiadas. Solo se
+   guardan vectores numéricos del rostro (tabla `face_enrollments`), nunca
+   las fotos, junto con la fecha del consentimiento.
+2. **Al entrar:** la app pide una foto y la compara con el registro.
+3. **Durante el monitoreo:** cada frame (ESP32-CAM o celular) se revisa
+   cada 5 s (cada 1 s mientras no esté verificada).
+
+Si la sesión tiene conductor registrado y **la cara no coincide** (dos
+comparaciones fallidas seguidas) o no se le ha reconocido en los últimos
+5 min, **los frames y el pulso de esa sesión se descartan**: no se guardan
+ni entran a la fusión. El buzzer manual del supervisor sigue funcionando, y
+el supervisor ve el video con el aviso *IDENTIDAD NO VERIFICADA*. Sesiones
+sin conductor registrado funcionan como antes (estado `sin_registro`).
+
+El estado está en `/estado` → `identidad` (`verificado`, `pendiente`,
+`vencida`, `no_coincide`, `sin_registro`, `deshabilitada`) y se ve en el
+panel y en la app. El conductor puede rehacer o **borrar** su registro desde
+*Mi rostro* en la app; el administrador, desde *Usuarios y roles*.
+
+**Modelos:** el Dockerfile los descarga al construir (~40 MB, no van en git).
+En local: `python scripts/descargar_modelos.py`. Sin ellos, la verificación
+queda `deshabilitada` y todo se acepta como antes (el arranque lo avisa).
+
+**Ley 1581 de 2012:** los datos biométricos son sensibles. El registro exige
+consentimiento explícito y se pueden borrar en cualquier momento. Limitación
+del prototipo: no hay detección de vida, así que una foto del conductor
+mostrada a la cámara podría pasar la verificación.
+
 ### App móvil (Flutter)
 
 La carpeta `mobile/` tiene una app Flutter (Android/iOS) que replica el panel
@@ -155,6 +190,8 @@ sidfam-backend/
 │   ├── vision.py         # MediaPipe Face Mesh: EAR, MAR, inclinación de cabeza
 │   ├── pulse.py           # Buffer y análisis de BPM/variabilidad
 │   ├── fusion.py          # Lógica de fusión multimodal + nivel de riesgo
+│   ├── identity.py        # Verificación facial del conductor (YuNet + SFace)
+│   ├── models/            # Modelos ONNX de rostro (descargados, no van en git)
 │   ├── database.py        # Persistencia (PostgreSQL o SQLite)
 │   └── templates/
 │       ├── dashboard.html # Panel en vivo + historial + analítica
@@ -164,7 +201,8 @@ sidfam-backend/
 │   ├── esp32cam_frame_sender/    # .ino del ESP32-CAM (QVGA, ~3 fps, http o https)
 │   └── esp32_pulse_sender/        # .ino de ejemplo para el ESP32 + sensor de pulso
 ├── mobile/                        # App Flutter (cliente móvil del panel)
-├── tests/                         # Pruebas pytest (pulso, fusión, endpoints)
+├── scripts/descargar_modelos.py   # Descarga los modelos de rostro
+├── tests/                         # Pruebas pytest (pulso, fusión, identidad, endpoints)
 ├── requirements.txt
 ├── requirements-dev.txt
 └── README.md

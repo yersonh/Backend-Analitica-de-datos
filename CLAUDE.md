@@ -138,6 +138,35 @@ event fires when the episode opens, again only if risk escalates `medio`→`alto
 (`detail` prefixed `"Escalada: "`), and the flag clears when the status leaves
 `alerta` / `advertencia_sensor` so the next occurrence counts as new.
 
+**`app/identity.py`** — driver face verification so a session's data is only
+its driver's. OpenCV YuNet (detect) + SFace (128-d embedding, cosine
+`MATCH_THRESHOLD` 0.363); ONNX models in `app/models/` (gitignored, fetched by
+`scripts/descargar_modelos.py`, run in the Dockerfile; missing models →
+`face_identifier.available` False → verification `deshabilitada`, everything
+accepted as before). Table `face_enrollments` (user_id, embeddings JSON, samples,
+consent_at): **only vectors, never photos** (Ley 1581 biometric data; enrollment
+requires `consentimiento=true`). `identity_guard` (singleton, RLock, in memory)
+keeps per-session status `pendiente` / `verificado` / `no_coincide` (+ derived
+`vencida`, `sin_registro`, `deshabilitada`), enrollments looked up by session via
+`users.session_id` (active users), cached `ENROLLMENT_CACHE_SECONDS`; call
+`identity_guard.invalidate(session_id)` whenever enrollment, a user's session or
+active flag changes. `_process_frame` calls `check_frame` (throttled:
+`CHECK_INTERVAL_VERIFIED`/`_UNVERIFIED`; `MISMATCHES_TO_REJECT` consecutive
+misses → `no_coincide`; any face in frame matching is enough) **before**
+MediaPipe; `/pulso` checks `allows_data`. Rejected data returns
+`ignorado: true, motivo: "identidad"` with the usual estado/buzzer fields, is
+neither fused nor stored, and the live frame gets an "IDENTIDAD NO VERIFICADA"
+banner. Sessions without an enrolled driver behave as before. Endpoints:
+`GET /api/identidad` (what the app must ask: `necesita` = `registro` /
+`verificacion`), `POST/DELETE /api/identidad/registro`,
+`POST /api/identidad/verificar`, admin `DELETE /api/usuarios/{id}/rostro`;
+`/api/usuarios` rows carry `rostro_registrado`, `/estado` carries `identidad`.
+App: `screens/identity_screen.dart` is shown by `_Gate` in `main.dart` while
+`AppState.identityNeed` is set (not blocking: "Ahora no" → `identityPostponed`
+until next login); "Mi rostro" in the account menu redoes/deletes it; live screen
+`_IdentityCard`. Web: `identity-card` in the dashboard, face tag/action in
+`usuarios.html`. Tests use a fake identifier (`tests/test_identity.py`).
+
 **`app/database.py`** — dual backend, chosen at import time: **PostgreSQL** (via
 `psycopg2`) when `DATABASE_URL` is set (Railway injects it), else **SQLite** at
 `app/sidfam.db` for local dev. Same public signatures for both; `main.py` is
