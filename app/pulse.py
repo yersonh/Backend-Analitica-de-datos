@@ -14,7 +14,12 @@ absoluto fijo. Por eso:
 
   1. Se aprende un `baseline_bpm` personal con las primeras
      BASELINE_SAMPLE_COUNT lecturas plausibles de la sesión y NO se
-     recalcula (para no "perseguir" una caída gradual real).
+     recalcula mientras dure el trayecto (para no "perseguir" una caída
+     gradual real). Se descarta y se vuelve a aprender si la sesión pasa
+     IDLE_RESET_SECONDS sin lecturas (otro trayecto, otro día) o si alguien
+     pide recalibrar (`reset()`, endpoint POST /api/sesiones/recalibrar).
+     Las primeras BASELINE_WARMUP_COUNT lecturas se ignoran para el basal:
+     al sentarse y ponerse el sensor el pulso suele estar más alto.
   2. Se marca `relative_drop_signal` cuando la MEDIANA de la ventana cae
      por debajo de `baseline_bpm * (1 - RELATIVE_DROP_THRESHOLD)`. La
      mediana (también en el basal) resiste los picos de ruido del sensor.
@@ -34,6 +39,7 @@ de picos antes de llegar a las métricas de abajo.
 from collections import deque
 from dataclasses import dataclass, field
 import statistics
+import threading
 import time
 
 WINDOW_SECONDS = 60           # ventana de análisis de HRV
@@ -41,6 +47,8 @@ MIN_SAMPLES_FOR_ANALYSIS = 15   # ~30 s de lecturas (1 cada 2 s) antes de evalua
 LOW_VARIABILITY_STD = 1.5     # std de BPM muy baja y sostenida -> señal de somnolencia
 
 BASELINE_SAMPLE_COUNT = 20    # lecturas plausibles para fijar el basal personal
+BASELINE_WARMUP_COUNT = 5     # primeras lecturas plausibles que NO cuentan para el basal (~10 s)
+IDLE_RESET_SECONDS = 600      # 10 min sin lecturas -> se descarta el basal y la ventana
 RELATIVE_DROP_THRESHOLD = 0.08  # caída >= 8 % de la media respecto al basal -> somnolencia
 
 PLAUSIBLE_BPM_MIN = 30       # por debajo: lectura no fisiológica (error de sensor)
@@ -80,6 +88,20 @@ class PulseAnalyzer:
         self._buffers: dict[str, deque[PulseReading]] = {}
         self._baselines: dict[str, float] = {}
         self._baseline_samples: dict[str, list[float]] = {}
+        self._warmup_seen: dict[str, int] = {}
+        self._last_reading_at: dict[str, float] = {}
+        # Los endpoints de ingesta corren en el threadpool de FastAPI
+        self._lock = threading.RLock()
+
+    def reset(self, device_id: str) -> None:
+        """Olvida el basal y la ventana de la sesión: se vuelven a aprender
+        con las lecturas que lleguen a partir de ahora."""
+        with self._lock:
+            self._buffers.pop(device_id, None)
+            self._baselines.pop(device_id, None)
+            self._baseline_samples.pop(device_id, None)
+            self._warmup_seen.pop(device_id, None)
+            self._last_reading_at.pop(device_id, None)
 
     def _get_buffer(self, device_id: str) -> deque[PulseReading]:
         if device_id not in self._buffers:
@@ -98,6 +120,11 @@ class PulseAnalyzer:
         if baseline is not None or implausible:
             return baseline
 
+        seen = self._warmup_seen.get(device_id, 0)
+        if seen < BASELINE_WARMUP_COUNT:
+            self._warmup_seen[device_id] = seen + 1
+            return None
+
         samples = self._baseline_samples.setdefault(device_id, [])
         samples.append(bpm)
         if len(samples) >= BASELINE_SAMPLE_COUNT:
@@ -107,6 +134,15 @@ class PulseAnalyzer:
         return baseline
 
     def add_reading(self, device_id: str, bpm: float) -> PulseResult:
+        with self._lock:
+            now = time.time()
+            last = self._last_reading_at.get(device_id)
+            if last is not None and now - last > IDLE_RESET_SECONDS:
+                self.reset(device_id)
+            self._last_reading_at[device_id] = now
+            return self._add_reading(device_id, bpm)
+
+    def _add_reading(self, device_id: str, bpm: float) -> PulseResult:
         implausible = bpm < PLAUSIBLE_BPM_MIN or bpm > PLAUSIBLE_BPM_MAX
         baseline = self._update_baseline(device_id, bpm, implausible)
 

@@ -32,6 +32,7 @@ conexión por operación (patrón contextmanager) en vez de un pool.
 """
 
 import os
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -115,6 +116,13 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL,
     last_login TEXT
 );
+CREATE TABLE IF NOT EXISTS face_enrollments (
+    user_id INTEGER PRIMARY KEY,
+    embeddings TEXT NOT NULL,
+    samples INTEGER NOT NULL,
+    consent_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 _SCHEMA_POSTGRES = """
@@ -177,6 +185,13 @@ CREATE TABLE IF NOT EXISTS users (
     session_version INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     last_login TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS face_enrollments (
+    user_id INTEGER PRIMARY KEY,
+    embeddings TEXT NOT NULL,
+    samples INTEGER NOT NULL,
+    consent_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL
 );
 """
 
@@ -669,3 +684,67 @@ def record_login(user_id: int) -> None:
         cur.execute(_ph("UPDATE users SET last_login = ? WHERE id = ?"),
                     (now if USE_POSTGRES else now.isoformat(timespec="seconds"), user_id))
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Registro facial (verificación de identidad del conductor, ver app/identity.py)
+#
+# Solo se guardan los vectores de rasgos (128 números por foto), nunca las
+# fotos, y la fecha del consentimiento explícito (Ley 1581 de 2012: los datos
+# biométricos son datos sensibles).
+# ---------------------------------------------------------------------------
+
+def save_face_enrollment(user_id: int, embeddings: list[list[float]]) -> None:
+    now = datetime.now()
+    ts = now if USE_POSTGRES else now.isoformat(timespec="seconds")
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph("DELETE FROM face_enrollments WHERE user_id = ?"), (user_id,))
+        cur.execute(_ph("INSERT INTO face_enrollments (user_id, embeddings, samples, consent_at, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)"),
+                    (user_id, json.dumps(embeddings), len(embeddings), ts, ts))
+        conn.commit()
+
+
+def _enrollment_row(row) -> dict | None:
+    if row is None:
+        return None
+    e = dict(row)
+    e["embeddings"] = json.loads(e["embeddings"])
+    for k in ("consent_at", "created_at"):
+        if isinstance(e.get(k), datetime):
+            e[k] = e[k].isoformat(timespec="seconds")
+    return e
+
+
+def get_face_enrollment(user_id: int) -> dict | None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph("SELECT * FROM face_enrollments WHERE user_id = ?"), (user_id,))
+        return _enrollment_row(cur.fetchone())
+
+
+def delete_face_enrollment(user_id: int) -> bool:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph("DELETE FROM face_enrollments WHERE user_id = ?"), (user_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+    return deleted
+
+
+def face_enrollments_for_session(session_id: str) -> list[dict]:
+    """Registros faciales de los usuarios ACTIVOS asignados a esa sesión."""
+    sql = ("SELECT f.* FROM face_enrollments f JOIN users u ON u.id = f.user_id "
+           "WHERE u.session_id = ? AND u.active = 1")
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(_ph(sql), (session_id,))
+        return [_enrollment_row(r) for r in cur.fetchall()]
+
+
+def enrolled_user_ids() -> set[int]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT user_id FROM face_enrollments")
+        return {int(dict(r)["user_id"]) for r in cur.fetchall()}

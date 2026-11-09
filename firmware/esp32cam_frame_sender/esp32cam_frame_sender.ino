@@ -1,168 +1,236 @@
 /*
   SIDFAM - ESP32-CAM: captura y envío de frames al backend
   ----------------------------------------------------------
-  Envía un frame JPEG cada FRAME_INTERVAL_MS al endpoint POST /frame
-  del backend FastAPI, como multipart/form-data (campo "file").
+  Envía un frame JPEG (QVGA, ~3 fps) al endpoint POST /frame del backend
+  FastAPI, como multipart/form-data (campos "session_id" y "file").
+  Funciona contra el backend local (http://) o contra Railway (https://).
 
   Ajustar:
     - WIFI_SSID / WIFI_PASSWORD
-    - SERVER_HOST (IP o dominio del backend)
-    - DEVICE_API_KEY (si el backend la exige)
-    - Modelo de cámara (CAMERA_MODEL_AI_THINKER es el más común)
+    - SERVER_URL (sin "/" final)
+    - SESSION_ID (el mismo que el ESP32 del pulso)
+    - DEVICE_API_KEY (el mismo valor que DEVICE_API_KEY en el backend)
 
-  Requiere las librerías: esp32-camera (incluida en el core de
-  Arduino para ESP32) y HTTPClient.
+  No subas al repositorio tus credenciales reales: deja los placeholders.
+
+  Requiere: esp32-camera (incluida en el core de Arduino para ESP32),
+  WiFiClientSecure y HTTPClient. Placa: AI-Thinker ESP32-CAM.
 */
 
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
-// ---------- Configuración de red ----------
+// =====================================================================
+// CONFIGURACIÓN (cambia esto)
+// =====================================================================
 const char* WIFI_SSID     = "TU_RED_WIFI";
-const char* WIFI_PASSWORD = "TU_PASSWORD";
-const char* SERVER_HOST   = "http://192.168.1.100:8000";  // IP del backend en la red local
-const char* SESSION_ID    = "default";
-// Clave del dispositivo: el mismo valor que DEVICE_API_KEY en el backend.
-// Vacía ("") si el backend no la exige (desarrollo local).
-const char* DEVICE_API_KEY = "";
+const char* WIFI_PASSWORD = "TU_PASSWORD";  // <-- pon aquí la clave de tu WiFi
 
-const unsigned long FRAME_INTERVAL_MS = 1500;  // cada 1.5s (ajustable)
+// URL del backend SIN "/" final:
+//   - Railway: "https://tu-app.up.railway.app"
+//   - Local:   "http://192.168.1.100:8000"
+const char* SERVER_URL = "http://192.168.1.100:8000";
 
-// ---------- Pines - modelo AI-Thinker ESP32-CAM ----------
-#define PWDN_GPIO_NUM     32
-#define RESET_GPIO_NUM    -1
-#define XCLK_GPIO_NUM      0
-#define SIOD_GPIO_NUM     26
-#define SIOC_GPIO_NUM     27
-#define Y9_GPIO_NUM       35
-#define Y8_GPIO_NUM       34
-#define Y7_GPIO_NUM       39
-#define Y6_GPIO_NUM       36
-#define Y5_GPIO_NUM       21
-#define Y4_GPIO_NUM       19
-#define Y3_GPIO_NUM       18
-#define Y2_GPIO_NUM        5
-#define VSYNC_GPIO_NUM    25
-#define HREF_GPIO_NUM     23
-#define PCLK_GPIO_NUM     22
+// IGUAL que en el DevKit (formato "persona_prueba", ej. "lauren_1")
+const char* SESSION_ID = "default";
 
-unsigned long lastSendTime = 0;
+// Clave del dispositivo: el MISMO valor que DEVICE_API_KEY en Railway
+// (y que el que ya usas en el DevKit del pulso). Sin ella el backend responde 401.
+const char* DEVICE_API_KEY = "";  // <-- pon aquí la clave
 
-void setupCamera() {
-  camera_config_t config;
-  config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer   = LEDC_TIMER_0;
-  config.pin_d0 = Y2_GPIO_NUM;
-  config.pin_d1 = Y3_GPIO_NUM;
-  config.pin_d2 = Y4_GPIO_NUM;
-  config.pin_d3 = Y5_GPIO_NUM;
-  config.pin_d4 = Y6_GPIO_NUM;
-  config.pin_d5 = Y7_GPIO_NUM;
-  config.pin_d6 = Y8_GPIO_NUM;
-  config.pin_d7 = Y9_GPIO_NUM;
-  config.pin_xclk = XCLK_GPIO_NUM;
-  config.pin_pclk = PCLK_GPIO_NUM;
-  config.pin_vsync = VSYNC_GPIO_NUM;
-  config.pin_href = HREF_GPIO_NUM;
-  config.pin_sscb_sda = SIOD_GPIO_NUM;
-  config.pin_sscb_scl = SIOC_GPIO_NUM;
-  config.pin_pwdn = PWDN_GPIO_NUM;
-  config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG;
+// ~3 frames por segundo para la cámara en vivo de la app. El ritmo real lo marca
+// la red: si cada envío tarda más, simplemente se manda el siguiente al terminar.
+const unsigned long FRAME_INTERVAL_MS = 333;
+const unsigned long COMM_TIMEOUT_MS   = 10000;  // sin respuesta en 10 s = pérdida de comunicación
 
-  // Resolución moderada: suficiente para landmarks faciales, sin saturar la red
-  config.frame_size = FRAMESIZE_VGA;   // 640x480
-  config.jpeg_quality = 12;            // menor = mejor calidad (10-20 razonable)
-  config.fb_count = 1;
+// ---------- Pines AI-Thinker ESP32-CAM ----------
+#define PWDN_GPIO_NUM  32
+#define RESET_GPIO_NUM -1
+#define XCLK_GPIO_NUM   0
+#define SIOD_GPIO_NUM  26
+#define SIOC_GPIO_NUM  27
+#define Y9_GPIO_NUM    35
+#define Y8_GPIO_NUM    34
+#define Y7_GPIO_NUM    39
+#define Y6_GPIO_NUM    36
+#define Y5_GPIO_NUM    21
+#define Y4_GPIO_NUM    19
+#define Y3_GPIO_NUM    18
+#define Y2_GPIO_NUM     5
+#define VSYNC_GPIO_NUM 25
+#define HREF_GPIO_NUM  23
+#define PCLK_GPIO_NUM  22
+#define LED_PIN        33   // LED rojo (activo en BAJO)
+#define FLASH_PIN       4   // LED flash blanco: se deja apagado
 
-  esp_err_t err = esp_camera_init(&config);
-  if (err != ESP_OK) {
-    Serial.printf("Error al iniciar la camara: 0x%x\n", err);
-    while (true) delay(1000);
+// =====================================================================
+// Estado
+// =====================================================================
+enum Indicator { IND_STARTING, IND_ERROR, IND_OK, IND_COMM_LOST };
+volatile Indicator g_indicator = IND_STARTING;
+unsigned long lastServerOk = 0;
+unsigned long lastFrameMs  = 0;
+
+WiFiClientSecure secureClient;
+WiFiClient       plainClient;
+HTTPClient       http;
+bool             useHttps = false;
+
+void setLed(bool on) { digitalWrite(LED_PIN, on ? LOW : HIGH); }   // activo en bajo
+
+void indicatorTask(void*) {
+  uint32_t tick = 0;
+  for (;;) {
+    tick++;
+    switch (g_indicator) {
+      case IND_COMM_LOST: setLed((tick / 2) % 2 == 0); break;
+      case IND_ERROR:     setLed((tick % 20) < 6 && (tick % 4) < 2); break;
+      case IND_STARTING:  setLed((tick / 10) % 2 == 0); break;
+      default:            setLed(false); break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
+bool initCamera() {
+  camera_config_t config = {};
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer   = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk  = XCLK_GPIO_NUM;
+  config.pin_pclk  = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href  = HREF_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn  = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+  // 320x240: pesa ~4 veces menos que VGA y permite ~3 fps hacia Railway. Face Mesh
+  // detecta bien la cara a esta resolución si el conductor está a menos de ~1 m.
+  config.frame_size   = FRAMESIZE_QVGA;
+  config.jpeg_quality = 12;                // 10-15 razonable
+  if (psramFound()) {
+    config.fb_location = CAMERA_FB_IN_PSRAM;
+    config.fb_count    = 2;
+    config.grab_mode   = CAMERA_GRAB_LATEST;  // siempre el frame más reciente
+  } else {
+    config.fb_location = CAMERA_FB_IN_DRAM;
+    config.frame_size  = FRAMESIZE_QVGA;
+    config.fb_count    = 1;
+    config.grab_mode   = CAMERA_GRAB_WHEN_EMPTY;
+  }
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("[CAMARA] Error al iniciar: 0x%x\n", err);
+    return false;
+  }
+  return true;
+}
+
 void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  Serial.printf("[WIFI] Conectando a %s", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Conectando a WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println();
-  Serial.print("Conectado. IP: ");
-  Serial.println(WiFi.localIP());
+  Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " FALLÓ (se reintentará)");
 }
 
 void sendFrame() {
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("Error al capturar frame");
+    Serial.println("[CAMARA] No se pudo capturar el frame");
     return;
   }
 
-  HTTPClient http;
-  String url = String(SERVER_HOST) + "/frame";
-  http.begin(url);
+  const String boundary = "SIDFAMBoundary";
+  String head = "--" + boundary + "\r\n"
+                "Content-Disposition: form-data; name=\"session_id\"\r\n\r\n" + String(SESSION_ID) + "\r\n"
+                "--" + boundary + "\r\n"
+                "Content-Disposition: form-data; name=\"file\"; filename=\"frame.jpg\"\r\n"
+                "Content-Type: image/jpeg\r\n\r\n";
+  String tail = "\r\n--" + boundary + "--\r\n";
 
-  String boundary = "SIDFAMBoundary";
-  http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-  if (strlen(DEVICE_API_KEY) > 0) {
-    http.addHeader("X-Device-Key", DEVICE_API_KEY);
-  }
-
-  String bodyStart =
-      "--" + boundary + "\r\n" +
-      "Content-Disposition: form-data; name=\"session_id\"\r\n\r\n" +
-      String(SESSION_ID) + "\r\n" +
-      "--" + boundary + "\r\n" +
-      "Content-Disposition: form-data; name=\"file\"; filename=\"frame.jpg\"\r\n" +
-      "Content-Type: image/jpeg\r\n\r\n";
-  String bodyEnd = "\r\n--" + boundary + "--\r\n";
-
-  size_t totalLen = bodyStart.length() + fb->len + bodyEnd.length();
-  uint8_t* body = (uint8_t*)malloc(totalLen);
+  size_t total = head.length() + fb->len + tail.length();
+  uint8_t* body = (uint8_t*)(psramFound() ? ps_malloc(total) : malloc(total));
   if (!body) {
-    Serial.println("Sin memoria suficiente para el request");
+    Serial.println("[CAMARA] Sin memoria para armar la petición");
     esp_camera_fb_return(fb);
-    http.end();
     return;
   }
-
-  size_t offset = 0;
-  memcpy(body + offset, bodyStart.c_str(), bodyStart.length()); offset += bodyStart.length();
-  memcpy(body + offset, fb->buf, fb->len); offset += fb->len;
-  memcpy(body + offset, bodyEnd.c_str(), bodyEnd.length()); offset += bodyEnd.length();
-
-  int httpCode = http.POST(body, totalLen);
-  if (httpCode > 0) {
-    Serial.printf("POST /frame -> %d\n", httpCode);
-    Serial.println(http.getString());
-  } else {
-    Serial.printf("Error en POST /frame: %s\n", http.errorToString(httpCode).c_str());
-  }
-
-  free(body);
-  http.end();
+  memcpy(body, head.c_str(), head.length());
+  memcpy(body + head.length(), fb->buf, fb->len);
+  memcpy(body + head.length() + fb->len, tail.c_str(), tail.length());
   esp_camera_fb_return(fb);
+
+  String url = String(SERVER_URL) + "/frame";
+  http.setReuse(true);
+  http.setTimeout(8000);
+  bool ok = useHttps ? http.begin(secureClient, url) : http.begin(plainClient, url);
+  if (ok) {
+    http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+    if (strlen(DEVICE_API_KEY) > 0) http.addHeader("X-Device-Key", DEVICE_API_KEY);
+    unsigned long t0 = millis();
+    int code = http.POST(body, total);
+    String resp = code > 0 ? http.getString() : "";
+    if (code >= 200 && code < 300) {
+      lastServerOk = millis();
+      bool face = resp.indexOf("\"face_detected\":true") >= 0;
+      Serial.printf("[FRAME] %d en %lu ms | rostro=%s\n", code, millis() - t0, face ? "SI" : "NO");
+    } else {
+      Serial.printf("[FRAME] Error %d: %s\n", code,
+                    code < 0 ? http.errorToString(code).c_str() : resp.c_str());
+    }
+    http.end();
+  }
+  free(body);
 }
 
 void setup() {
   Serial.begin(115200);
-  setupCamera();
+  delay(300);
+  Serial.println("\n=== SIDFAM - ESP32-CAM ===");
+  if (strlen(DEVICE_API_KEY) == 0) Serial.println("[AVISO] DEVICE_API_KEY vacía: el backend rechazará los frames (401)");
+
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(FLASH_PIN, OUTPUT);
+  digitalWrite(FLASH_PIN, LOW);
+  xTaskCreatePinnedToCore(indicatorTask, "indicadores", 2048, nullptr, 1, nullptr, 1);
+
+  // CU2: sin cámara no se inicia el monitoreo
+  while (!initCamera()) {
+    g_indicator = IND_ERROR;
+    Serial.println("[INICIO] Cámara sin respuesta. Reintento en 5 s...");
+    delay(5000);
+  }
+  Serial.println("[INICIO] Cámara OK");
+
+  useHttps = String(SERVER_URL).startsWith("https://");
+  if (useHttps) secureClient.setInsecure();   // prototipo: no valida el certificado
+
   connectWiFi();
+  lastServerOk = millis();
+  g_indicator = IND_OK;
 }
 
 void loop() {
-  if (millis() - lastSendTime >= FRAME_INTERVAL_MS) {
-    lastSendTime = millis();
-    if (WiFi.status() == WL_CONNECTED) {
-      sendFrame();
-    } else {
-      Serial.println("WiFi desconectado, reintentando...");
-      connectWiFi();
-    }
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  } else if (millis() - lastFrameMs >= FRAME_INTERVAL_MS) {
+    lastFrameMs = millis();
+    sendFrame();
   }
+  g_indicator = (millis() - lastServerOk > COMM_TIMEOUT_MS) ? IND_COMM_LOST : IND_OK;
+  delay(10);
 }

@@ -105,6 +105,30 @@ class ApiClient {
     return (_json(r) as Map).cast<String, dynamic>();
   }
 
+  Future<Map<String, dynamic>> deleteJson(String path) async {
+    final r = await _send(() => _http.delete(_uri(path), headers: _headers()), path);
+    return (_json(r) as Map).cast<String, dynamic>();
+  }
+
+  /// multipart/form-data con varias fotos JPEG bajo el mismo campo (registro facial).
+  Future<Map<String, dynamic>> postPhotos(
+    String path,
+    String field,
+    List<Uint8List> jpegs, [
+    Map<String, String> fields = const {},
+  ]) async {
+    final r = await _send(() async {
+      final request = http.MultipartRequest('POST', _uri(path))
+        ..headers.addAll(_headers())
+        ..fields.addAll(fields);
+      for (var i = 0; i < jpegs.length; i++) {
+        request.files.add(http.MultipartFile.fromBytes(field, jpegs[i], filename: 'foto_$i.jpg'));
+      }
+      return http.Response.fromStream(await _http.send(request));
+    }, path);
+    return (_json(r) as Map).cast<String, dynamic>();
+  }
+
   /// Envía una foto de la cámara del celular (multipart, como la ESP32-CAM).
   Future<void> postFrame(Uint8List jpeg, String? sessionId) async {
     const path = '/api/camara/dispositivo';

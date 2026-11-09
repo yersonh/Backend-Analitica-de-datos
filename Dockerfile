@@ -12,6 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Modelos de rostro para la verificación del conductor (app/identity.py).
+# Van antes del código para que Docker reutilice esta capa entre despliegues.
+# Si la descarga falla, falla el build: mejor que desplegar con la
+# verificación apagada sin darse cuenta.
+COPY scripts/descargar_modelos.py ./scripts/
+RUN python scripts/descargar_modelos.py
+
 COPY app/ ./app/
 
 # Hora de Colombia para los timestamps (Railway corre en UTC por defecto)

@@ -494,6 +494,15 @@
         .wake-btn { padding: 7px 13px; border: 0; border-radius: 999px; background: var(--rojo); color: #fff; font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
         .wake-btn:hover { opacity: 0.85; }
         .wake-btn:disabled { opacity: 0.5; cursor: default; }
+        .recal-btn { margin-left: auto; padding: 5px 11px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: var(--violeta); font: inherit; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
+        .recal-btn:disabled { opacity: 0.5; cursor: default; }
+        .identity-card { display: flex; align-items: center; gap: 14px; --c: var(--ambar); }
+        .identity-card[data-e="verificado"] { --c: var(--verde); }
+        .identity-card[data-e="no_coincide"] { --c: var(--rojo); }
+        .identity-card[data-e="sin_registro"] { --c: var(--muted); }
+        .identity-card svg { width: 26px; height: 26px; flex: none; color: var(--c); }
+        .identity-card .txt b { display: block; font-size: 0.92rem; color: var(--c); }
+        .identity-card .txt span { font-size: 0.8rem; color: var(--muted); }
         .buzzer-card { display: flex; align-items: center; gap: 14px; --c: var(--muted); }
         .buzzer-card.on { --c: var(--rojo); }
         .buzzer-card svg { width: 26px; height: 26px; flex: none; color: var(--c); }
@@ -791,6 +800,9 @@
                     {% if "usuarios" in perms %}
                     <a href="/usuarios" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M17 11l2 2 4-4"/></svg>Usuarios y roles</a>
                     {% endif %}
+                    {% if user.session_id %}
+                    <a href="/cuenta/rostro" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15c1.7 1.3 4.3 1.3 6 0"/></svg>Mi rostro</a>
+                    {% endif %}
                     <a href="/cuenta/clave" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Cambiar contraseña</a>
                     <form method="post" action="/logout"><button type="submit" class="danger" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Cerrar sesión</button></form>
                 </div>
@@ -901,6 +913,12 @@
 
             <!-- ===== Fusión ===== -->
             <!-- ===== Buzzer ===== -->
+            <section class="glass pad span-12 identity-card" id="identity-card" style="display:none">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+                <div class="txt"><b id="identity-title"></b><span id="identity-text"></span></div>
+                <a class="recal-btn" id="identity-link" href="/cuenta/rostro" style="display:none;text-decoration:none">Mi rostro</a>
+            </section>
+
             <section class="glass pad span-12 buzzer-card" id="buzzer-card" style="display:none">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 0 0 3.4 0"/></svg>
                 <div class="txt"><b>Buzzer del dispositivo</b><span id="buzzer-text"></span></div>
@@ -957,6 +975,7 @@
                 <div class="card-title">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
                     Indicadores frente a umbral
+                    <button type="button" class="recal-btn" id="recal-btn" title="Olvida el basal de pulso, EAR y cabeceo de esta sesión y lo vuelve a aprender">Recalibrar</button>
                 </div>
                 <div class="meters" id="meters"></div>
             </section>
@@ -1092,6 +1111,7 @@
     <script>
     (() => {
         const SESSION = {{ session_id | tojson }};
+        const MY_SESSION = {{ user.session_id | tojson }};
         const THR = {{ thresholds | tojson }};
         const MESH = {{ mesh_contours | tojson }};
         const CAN_FLEET = {{ ("todas_sesiones" in perms) | tojson }};
@@ -1288,8 +1308,10 @@
         })();
 
         // ---------- Medidores ----------
+        // Umbral de EAR: el fijo hasta que la sesión termina de calibrarse; luego el personal (/estado ear_umbral)
+        let earThr = THR.ear;
         const METERS = [
-            { id: "ear",  name: "Apertura ocular", hint: "EAR", max: 0.4, thr: THR.ear, bad: (v) => v < THR.ear, fmt: (v) => fmt(v, 3), thrLabel: "cierre " + THR.ear },
+            { id: "ear",  name: "Apertura ocular", hint: "EAR", max: 0.4, thr: THR.ear, bad: (v) => v < earThr, fmt: (v) => fmt(v, 3), thrLabel: "cierre " + THR.ear },
             { id: "mar",  name: "Apertura bucal",  hint: "MAR · bostezo", max: 1, thr: THR.mar, bad: (v) => v > THR.mar, fmt: (v) => fmt(v, 3), thrLabel: "bostezo " + THR.mar },
             { id: "tilt", name: "Inclinación de cabeza", hint: "grados", max: 45, thr: THR.head_tilt_deg, bad: (v) => v > THR.head_tilt_deg, fmt: (v) => fmt(v, 1) + "°", thrLabel: THR.head_tilt_deg + "°" },
             { id: "drop", name: "Caída vs. basal", hint: "mediana 60s", max: 0.2, thr: THR.relative_drop, bad: (v) => v >= THR.relative_drop, fmt: (v) => (v * 100).toFixed(1) + " %", thrLabel: (THR.relative_drop * 100) + " %" },
@@ -1368,7 +1390,7 @@
         }
         let lastBaseline = null;
         function renderTrends() {
-            drawTrend($("trend-ear"), hist.ear, { min: 0, max: 0.4, dec: 2, color: "#6c6fd6", ref: THR.ear, refColor: "#e0607e", refLabel: "umbral " + THR.ear, unit: "EAR" });
+            drawTrend($("trend-ear"), hist.ear, { min: 0, max: 0.4, dec: 2, color: "#6c6fd6", ref: earThr, refColor: "#e0607e", refLabel: "umbral " + earThr, unit: "EAR" });
             drawTrend($("trend-bpm"), hist.bpm, { auto: true, min: 50, max: 110, dec: 0, color: "#e0607e", ref: lastBaseline, refColor: "#9a9cc0", refLabel: lastBaseline ? "basal " + Math.round(lastBaseline) : "", unit: "BPM" });
         }
         new ResizeObserver(() => renderTrends()).observe($("trend-ear"));
@@ -1456,6 +1478,7 @@
             $("scan-tag").textContent = s.face_detected === false ? "BUSCANDO ROSTRO…" : (s.ear != null ? `APERTURA ${Math.round(clamp(s.ear / 0.32, 0, 1) * 100)}%` : "APERTURA —");
             setCamera(!!s.camara_activa);
             applyBuzzer(s);
+            applyIdentity(s);
 
             // pulso
             const bpm = s.bpm;
@@ -1481,6 +1504,13 @@
             ecg.set(s.data_is_fresh ? bpm : null, s.implausible_reading ? "#cdb6ff" : (s.physiological_signal ? "#ffa3b8" : "#8fe3c0"));
 
             // medidores
+            const nuevoThr = s.ear_umbral != null ? Math.round(s.ear_umbral * 1000) / 1000 : THR.ear;
+            if (nuevoThr !== earThr) {
+                earThr = nuevoThr;
+                const tick = document.querySelector("#mt-ear .tick");
+                tick.style.left = clamp(earThr / 0.4, 0, 1) * 100 + "%";
+                tick.querySelector("span").textContent = (s.ear_umbral != null ? "cierre (personal) " : "cierre ") + earThr;
+            }
             setMeter("ear", s.ear);
             setMeter("mar", s.mar);
             setMeter("tilt", s.head_tilt_deg != null ? Math.abs(s.head_tilt_deg) : null);
@@ -1784,13 +1814,36 @@
             catch (err) { console.error("No se pudo actualizar el historial", err); }
         }
         // ---------- Buzzer ----------
+        // ---------- Verificación facial del conductor ----------
+        // (registro y verificación desde la web: Perfil > Mi rostro, /cuenta/rostro)
+        const IDENTIDAD = {
+            verificado: ["Identidad verificada", "El rostro frente a la cámara es el del conductor de esta sesión."],
+            no_coincide: ["Identidad no coincide", "La persona frente a la cámara no es el conductor de esta sesión: sus lecturas se descartan."],
+            sin_registro: ["Sin registro facial", "El conductor no ha registrado su rostro (se hace desde la app): los datos se guardan sin verificar quién es."],
+            pendiente: ["Esperando reconocer al conductor", "Mientras la cámara no reconozca su rostro, las lecturas de esta sesión no se guardan."],
+            vencida: ["Esperando reconocer al conductor", "Hace rato la cámara no reconoce al conductor: las lecturas de esta sesión no se guardan."],
+        };
+        function applyIdentity(s) {
+            const card = $("identity-card"), id = s.identidad || {};
+            const info = IDENTIDAD[id.estado];
+            card.style.display = SESSION !== "todas" && info ? "" : "none";
+            if (!info) return;
+            card.dataset.e = id.estado;
+            $("identity-title").textContent = info[0];
+            $("identity-text").textContent = info[1];
+            // en la sesión propia, atajo a Perfil > Mi rostro para registrarse o verificarse
+            const own = MY_SESSION && SESSION === MY_SESSION;
+            $("identity-link").style.display = own && id.estado !== "verificado" ? "" : "none";
+            $("identity-link").textContent = id.estado === "sin_registro" ? "Registrar mi rostro" : "Verificar";
+        }
         function applyBuzzer(s) {
             const card = $("buzzer-card");
             const on = !!s.buzzer;
             // el conductor solo lo ve mientras suena; "todas" no es un dispositivo
             card.style.display = SESSION !== "todas" && (CAN_FLEET || on) ? "" : "none";
             card.classList.toggle("on", on);
-            $("buzzer-text").textContent = !on ? "Apagado. Suena solo si se confirma fatiga."
+            $("buzzer-text").textContent = !on ? "Apagado. Suena si se confirma fatiga o hay un microsueño."
+                : s.microsueno ? "Sonando: ojos cerrados demasiado tiempo (posible microsueño)."
                 : s.buzzer_auto ? "Sonando: fatiga confirmada por el sistema."
                 : `Sonando por orden del supervisor (${Math.ceil(s.buzzer_manual_seg || 0)} s).`;
         }
@@ -1810,6 +1863,24 @@
             } finally { btn.disabled = false; }
         }
         if ($("buzzer-btn")) $("buzzer-btn").addEventListener("click", (ev) => ringBuzzer(SESSION, ev.currentTarget));
+
+        // ---------- Recalibrar basales (pulso, EAR, cabeceo) ----------
+        if (SESSION === "todas") $("recal-btn").style.display = "none";
+        $("recal-btn").addEventListener("click", async (ev) => {
+            const btn = ev.currentTarget;
+            btn.disabled = true;
+            try {
+                const r = await fetch("/api/sesiones/recalibrar", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: SESSION }),
+                });
+                if (r.status === 401) return toLogin();
+                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
+                toast({ risk_level: "buzzer", title: "Recalibrando", detail: "Mira de frente a la cámara unos segundos; el pulso tarda ~1 min.", c: "var(--verde)", silent: true });
+            } catch (err) {
+                toast({ risk_level: "buzzer", title: "No se pudo recalibrar", detail: err.message, c: "var(--rojo)", silent: true });
+            } finally { btn.disabled = false; }
+        });
 
         // ---------- Flota (quien ve todas las sesiones) ----------
         if (CAN_FLEET) {

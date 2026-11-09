@@ -13,6 +13,16 @@ Endpoints:
   GET  /api/camara/stream -> la misma cámara como video en vivo (MJPEG), para el panel web.
   POST /api/camara/dispositivo -> foto de la cámara del computador o del celular (con login).
   POST /api/buzzer -> un supervisor hace sonar el buzzer del conductor.
+  POST /api/sesiones/recalibrar -> olvida los basales (pulso, EAR, pitch) de una sesión.
+
+Verificación facial del conductor (ver app/identity.py):
+  GET    /api/identidad              -> estado del registro y la verificación propios.
+  POST   /api/identidad/registro     -> registra el rostro (3-5 fotos + consentimiento).
+  DELETE /api/identidad/registro     -> borra el registro propio.
+  POST   /api/identidad/verificar    -> verifica una foto contra el registro (al entrar).
+  DELETE /api/usuarios/{id}/rostro   -> el administrador borra el registro de alguien.
+  Si la sesión tiene conductor registrado y la cara no coincide, los frames y el
+  pulso de esa sesión se descartan (no se guardan ni entran a la fusión).
   GET  /            -> dashboard HTML (RF09, RF10).
 
 Analítica de datos (ver app/analytics.py):
@@ -31,6 +41,7 @@ Acceso (ver app/auth.py para los roles y permisos):
   GET/POST /login              -> inicio de sesión.
   POST /logout                 -> cierra la sesión.
   GET/POST /cuenta/clave       -> cambio de la contraseña propia.
+  GET  /cuenta/rostro          -> registro/verificación facial propios (perfil, web).
   GET  /usuarios               -> gestión de usuarios (solo administrador).
   /api/usuarios...             -> API JSON de esa gestión.
 
@@ -38,6 +49,11 @@ App móvil (Flutter, carpeta mobile/): autenticación con token Bearer.
   POST /api/login              -> {token, user, must_change_password}.
   POST /api/cuenta/clave       -> cambia la contraseña y devuelve un token nuevo.
   GET  /api/config             -> umbrales, roles y parámetros del panel.
+
+Los endpoints de ingesta (/frame, /pulso, /api/camara/dispositivo) son `def`
+y no `async def`: MediaPipe, OpenCV y la base de datos bloquean, y en el
+threadpool no congelan el event loop (el stream MJPEG, el login, /estado).
+Los módulos de análisis protegen su estado con locks.
 
 /frame y /pulso no usan login: se autentican con la cabecera X-Device-Key
 (DEVICE_API_KEY). GET /estado acepta tanto sesión iniciada como esa cabecera. El resto exige sesión iniciada y el permiso del endpoint.
@@ -48,8 +64,10 @@ Ejecutar en desarrollo:
 
 import asyncio
 import io
+import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -63,13 +81,30 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from pydantic import BaseModel
 
-from . import analytics, auth, database, overlay, pulse, vision
+from . import analytics, auth, database, fusion, identity, overlay, pulse, vision
 from .auth import User, require
 from .fusion import fusion_engine
+from .identity import identity_guard
 from .pulse import pulse_analyzer
 from .vision import face_analyzer
 
-app = FastAPI(title="SIDFAM Backend")
+log = logging.getLogger("sidfam")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    database.init_db()
+    auth.bootstrap()
+    if not identity.face_identifier.available:
+        log.warning("SIDFAM: verificación facial deshabilitada: %s",
+                    identity.face_identifier.unavailable_reason)
+    if database.USE_POSTGRES and auth.DEVICE_API_KEY is None:
+        log.error("SIDFAM: DEVICE_API_KEY no está definida en producción (DATABASE_URL presente): "
+                  "/frame y /pulso aceptan datos de cualquiera. Defínela en las variables del servicio.")
+    yield
+
+
+app = FastAPI(title="SIDFAM Backend", lifespan=lifespan)
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -81,6 +116,17 @@ app.mount(
 )
 
 DEFAULT_SESSION_ID = "default"
+
+# Un frame QVGA JPEG del ESP32-CAM pesa ~10 KB; una foto del celular, unos cientos.
+MAX_FRAME_BYTES = 2 * 1024 * 1024
+
+
+def _read_frame(file: UploadFile) -> bytes:
+    """Lee el archivo subido sin aceptar más de MAX_FRAME_BYTES (413 si se pasa)."""
+    data = file.file.read(MAX_FRAME_BYTES + 1)
+    if len(data) > MAX_FRAME_BYTES:
+        raise HTTPException(status_code=413, detail=f"La imagen supera {MAX_FRAME_BYTES // 1024} KB")
+    return data
 
 # --- Cámara en vivo (solo en memoria, nunca en la base) ---
 # Último frame de cada sesión ya anotado con la vista del modelo (JPEG, hora).
@@ -108,14 +154,10 @@ BUZZER_MAX_SECONDS = 15
 
 def _buzzer_state(session_id: str, status: dict) -> dict:
     manual = max(0.0, _buzzer_until.get(session_id, 0.0) - time.time())
-    auto = status.get("status") == "alerta"
+    # Alerta confirmada (RF06) o microsueño (ojos cerrados > MICROSLEEP_SECONDS,
+    # aunque el pulso aún no confirme: ver fusion.py)
+    auto = status.get("status") == "alerta" or bool(status.get("microsueno"))
     return {"buzzer": auto or manual > 0, "buzzer_auto": auto, "buzzer_manual_seg": round(manual, 1)}
-
-
-@app.on_event("startup")
-def on_startup():
-    database.init_db()
-    auth.bootstrap()
 
 
 # ---------------------------------------------------------------------------
@@ -170,14 +212,48 @@ def _persist(session_id: str, event) -> None:
         database.increment_normal_reading(session_id)
 
 
+def _decode(raw_bytes: bytes):
+    return cv2.imdecode(np.frombuffer(raw_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+
+def _identity_rejected(session_id: str, image_bgr=None) -> dict:
+    """Respuesta de ingesta cuando la identidad no está verificada: los datos se
+    descartan, pero el dispositivo recibe igual el estado y el buzzer (un
+    supervisor puede seguir despertando al conductor). El supervisor ve el
+    video con un aviso, para saber quién está frente a la cámara."""
+    if image_bgr is not None:
+        img = image_bgr.copy()
+        h, w = img.shape[:2]
+        cv2.rectangle(img, (0, 0), (w, max(22, h // 10)), (60, 60, 220), -1)
+        cv2.putText(img, "IDENTIDAD NO VERIFICADA", (8, max(16, h // 14)),
+                    cv2.FONT_HERSHEY_SIMPLEX, max(0.4, w / 800), (255, 255, 255), 1, cv2.LINE_AA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if ok:
+            _live_frames[session_id] = (buf.tobytes(), time.time())
+    status = fusion_engine.get_current_status(session_id)
+    return {
+        "ignorado": True,
+        "motivo": "identidad",
+        "identidad": identity_guard.status(session_id),
+        "estado": status["status"],
+        "alerta": status["status"] == "alerta",
+        "nivel_riesgo": status["risk_level"],
+        "buzzer": _buzzer_state(session_id, status)["buzzer"],
+    }
+
+
 def _process_frame(raw_bytes: bytes, session_id: str, con_malla: bool = False) -> dict:
     """Procesa un frame JPEG con MediaPipe, venga del ESP32-CAM o del dispositivo.
-    con_malla añade los puntos de la cara (0 a 1) para dibujarlos sobre el video local."""
-    np_arr = np.frombuffer(raw_bytes, dtype=np.uint8)
-    image_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    con_malla añade los puntos de la cara (0 a 1) para dibujarlos sobre el video local.
+    Antes se comprueba la identidad: si no es el conductor de la sesión, el frame
+    se descarta (ni fusión ni base)."""
+    image_bgr = _decode(raw_bytes)
 
     if image_bgr is None:
         return {"error": "No se pudo decodificar la imagen recibida"}
+
+    if not identity_guard.check_frame(session_id, image_bgr):
+        return _identity_rejected(session_id, image_bgr)
 
     vision_result = face_analyzer.analyze(image_bgr)
     event = fusion_engine.update_vision(session_id, vision_result)
@@ -223,9 +299,9 @@ def _process_frame(raw_bytes: bytes, session_id: str, con_malla: bool = False) -
 
 
 @app.post("/frame", dependencies=[Depends(auth.require_device)])
-async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEFAULT_SESSION_ID)):
+def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEFAULT_SESSION_ID)):
     """Recibe un frame JPEG del ESP32-CAM."""
-    raw_bytes = await file.read()
+    raw_bytes = _read_frame(file)
     if _device_camera_active(session_id):
         status = fusion_engine.get_current_status(session_id)
         return {
@@ -239,7 +315,7 @@ async def receive_frame(file: UploadFile = File(...), session_id: str = Form(DEF
 
 
 @app.post("/api/camara/dispositivo")
-async def receive_device_frame(file: UploadFile = File(...), session_id: str | None = Form(None),
+def receive_device_frame(file: UploadFile = File(...), session_id: str | None = Form(None),
                                malla: bool = Form(False), user: User = Depends(require("panel"))):
     """Recibe un frame de la cámara del computador o del celular. Va por aparte de
     /frame: se autentica con el login del usuario y no con la clave del ESP32.
@@ -250,15 +326,19 @@ async def receive_device_frame(file: UploadFile = File(...), session_id: str | N
     if session_id and session_id != user.session_id:
         raise auth.Forbidden("La cámara del dispositivo solo puede enviar a tu propia sesión.")
     session_id = user.session_id
-    result = _process_frame(await file.read(), session_id, con_malla=malla)
+    result = _process_frame(_read_frame(file), session_id, con_malla=malla)
     if "error" not in result:
         _device_camera_at[session_id] = time.time()
     return result
 
 
 @app.post("/pulso", dependencies=[Depends(auth.require_device)])
-async def receive_pulse(bpm: float = Form(...), session_id: str = Form(DEFAULT_SESSION_ID)):
+def receive_pulse(bpm: float = Form(...), session_id: str = Form(DEFAULT_SESSION_ID)):
     """Recibe una lectura de BPM del ESP32 con el sensor de pulso."""
+    if not identity_guard.allows_data(session_id):
+        # La cámara no confirma que el conductor sea el de la sesión: el pulso
+        # tampoco es suyo con seguridad, así que no se mezcla con sus datos.
+        return _identity_rejected(session_id)
     pulse_result = pulse_analyzer.add_reading(session_id, bpm)
     event = fusion_engine.update_pulse(session_id, pulse_result)
     _persist(session_id, event)
@@ -345,6 +425,7 @@ def get_status(request: Request, session_id: str | None = None):
     status["camara_activa"] = bool(frame and time.time() - frame[1] <= CAMERA_STALE_SECONDS)
     status["camara_fuente"] = ("dispositivo" if _device_camera_active(session_id)
                                else "esp32" if status["camara_activa"] else None)
+    status["identidad"] = identity_guard.status(session_id)
     return status
 
 
@@ -401,6 +482,24 @@ def trigger_buzzer(body: BuzzerIn):
     segundos = max(1, min(BUZZER_MAX_SECONDS, body.segundos))
     _buzzer_until[body.session_id] = time.time() + segundos
     return {"session_id": body.session_id, "segundos": segundos}
+
+
+class RecalibrarIn(BaseModel):
+    session_id: str | None = None
+
+
+@app.post("/api/sesiones/recalibrar")
+def recalibrate_session(body: RecalibrarIn, user: User = Depends(require("panel"))):
+    """Olvida los basales de la sesión (pulso, EAR y pitch) para que se vuelvan a
+    aprender con las lecturas siguientes: otro conductor en el mismo equipo, la
+    cámara se movió, o el basal se tomó con el pulso agitado. El conductor solo
+    puede recalibrar la suya; supervisor/administrador, cualquiera."""
+    session_id = auth.resolve_session(user, body.session_id)
+    if not session_id or session_id == analytics.TODAS:
+        raise HTTPException(status_code=422, detail="Indica la sesión a recalibrar")
+    pulse_analyzer.reset(session_id)
+    fusion_engine.reset(session_id)
+    return {"session_id": session_id, "recalibrada": True}
 
 
 # Orden de la vista de flota: lo más urgente primero
@@ -657,6 +756,13 @@ def password_page(request: Request, user: User = Depends(require(allow_password_
         "user": user, "error": None, "min_password": auth.MIN_PASSWORD_LENGTH})
 
 
+@app.get("/cuenta/rostro", response_class=HTMLResponse)
+def face_page(request: Request, user: User = Depends(require("panel"))):
+    """Perfil > Mi rostro: el usuario registra, verifica o borra su rostro desde la
+    web con la cámara del computador (mismos endpoints /api/identidad que la app)."""
+    return templates.TemplateResponse(request, "rostro.html", {"user": user})
+
+
 def _apply_password_change(user: User, actual: str, nueva: str, confirmar: str) -> tuple[str | None, int]:
     """Valida y guarda la nueva contraseña. Devuelve (error, nueva session_version)."""
     row = database.get_user(user.id)
@@ -753,6 +859,9 @@ def api_config(user: User = Depends(require(allow_password_change=True))):
             "head_tilt_deg": vision.HEAD_TILT_THRESHOLD_DEG,
             "relative_drop": pulse.RELATIVE_DROP_THRESHOLD,
             "low_variability_std": pulse.LOW_VARIABILITY_STD,
+            "microsleep_seconds": fusion.MICROSLEEP_SECONDS,
+            "ear_closed_fraction": fusion.EAR_CLOSED_FRACTION,
+            "pitch_deviation": fusion.PITCH_DEVIATION,
         },
         "roles": {k: {"label": v["label"], "descripcion": v["descripcion"], "permisos": sorted(v["permisos"])}
                   for k, v in auth.ROLES.items()},
@@ -822,7 +931,9 @@ def users_page(request: Request, user: User = Depends(require("usuarios"))):
 
 @app.get("/api/usuarios", dependencies=[Depends(require("usuarios"))])
 def api_list_users():
-    return {"usuarios": [_public_user(u) for u in database.list_users()]}
+    enrolled = database.enrolled_user_ids()
+    return {"usuarios": [{**_public_user(u), "rostro_registrado": u["id"] in enrolled}
+                         for u in database.list_users()]}
 
 
 @app.post("/api/usuarios", status_code=201, dependencies=[Depends(require("usuarios"))])
@@ -868,6 +979,9 @@ def api_update_user(user_id: int, data: UserUpdate, user: User = Depends(require
             or (data.active is not None and data.active != target["active"])):
         changes["session_version"] = int(target["session_version"]) + 1
     database.update_user(user_id, **changes)
+    # el registro facial se busca por sesión: cambiar la sesión o desactivar lo afecta
+    for sid in {target["session_id"], changes["session_id"]} - {None}:
+        identity_guard.invalidate(sid)
     return {"usuario": _public_user(database.get_user(user_id))}
 
 
@@ -883,3 +997,115 @@ def api_reset_password(user_id: int, data: PasswordReset):
     database.update_user(user_id, password_hash=auth.hash_password(password), must_change_password=True,
                          session_version=int(target["session_version"]) + 1)
     return {"ok": True, "password_temporal": password if temp else None}
+
+
+# ---------------------------------------------------------------------------
+# Verificación facial del conductor (ver app/identity.py)
+# ---------------------------------------------------------------------------
+
+CONSENTIMIENTO_BIOMETRICO = (
+    "Autorizo a SIDFAM a tratar mis datos biométricos (rasgos faciales) con el único "
+    "fin de verificar que los datos de mi sesión de monitoreo son míos. Se guardan solo "
+    "vectores numéricos de mi rostro, no fotos. Puedo borrarlos cuando quiera desde la "
+    "app. Ley 1581 de 2012."
+)
+
+
+def _own_session(user: User) -> str:
+    if not user.session_id:
+        raise auth.Forbidden("La verificación facial es para cuentas con una sesión propia (conductores).")
+    return user.session_id
+
+
+def _identity_disabled() -> None:
+    if not identity.face_identifier.available:
+        raise HTTPException(status_code=503, detail="La verificación facial no está disponible en el servidor.")
+
+
+@app.get("/api/identidad")
+def api_identity(user: User = Depends(require("panel"))):
+    """Lo que la app necesita al entrar: si aplica, si hay registro y si toca
+    registrar o verificar."""
+    if not user.session_id:
+        return {"aplica": False}
+    enrollment = database.get_face_enrollment(user.id)
+    status = identity_guard.status(user.session_id)
+    habilitada = status["estado"] != "deshabilitada"
+    necesita = None
+    if habilitada:
+        if not enrollment:
+            necesita = "registro"
+        elif status["estado"] != "verificado":
+            necesita = "verificacion"
+    return {
+        "aplica": True,
+        "habilitada": habilitada,
+        "registrado": bool(enrollment),
+        "registrado_en": enrollment["created_at"] if enrollment else None,
+        "necesita": necesita,
+        "consentimiento": CONSENTIMIENTO_BIOMETRICO,
+        "fotos_min": identity.ENROLL_MIN_SAMPLES,
+        "fotos_max": identity.ENROLL_MAX_SAMPLES,
+        **{"estado": status},
+    }
+
+
+@app.post("/api/identidad/registro")
+def api_identity_enroll(files: list[UploadFile] = File(...), consentimiento: bool = Form(False),
+                        user: User = Depends(require("panel"))):
+    """Registra (o rehace) el rostro del conductor con 3-5 fotos. Exige el
+    consentimiento explícito; las fotos no se guardan, solo sus vectores."""
+    session_id = _own_session(user)
+    _identity_disabled()
+    if not consentimiento:
+        raise HTTPException(status_code=422, detail="Debes aceptar el tratamiento de tus datos biométricos.")
+    images = []
+    for f in files:
+        img = _decode(_read_frame(f))
+        if img is None:
+            raise HTTPException(status_code=422, detail="Una de las fotos no se pudo leer.")
+        images.append(img)
+    try:
+        embeddings = identity.build_enrollment(identity.face_identifier, images)
+    except identity.IdentityError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    database.save_face_enrollment(user.id, embeddings)
+    identity_guard.invalidate(session_id)
+    # quien acaba de registrarse está frente a la cámara: la sesión queda verificada
+    identity_guard.mark_verified(session_id, user.id)
+    return {"registrado": True, "muestras": len(embeddings), "estado": identity_guard.status(session_id)}
+
+
+@app.delete("/api/identidad/registro")
+def api_identity_delete_own(user: User = Depends(require("panel"))):
+    """El conductor borra sus datos biométricos (derecho de supresión)."""
+    deleted = database.delete_face_enrollment(user.id)
+    if user.session_id:
+        identity_guard.invalidate(user.session_id)
+    return {"borrado": deleted}
+
+
+@app.post("/api/identidad/verificar")
+def api_identity_verify(file: UploadFile = File(...), user: User = Depends(require("panel"))):
+    """Verificación al entrar: compara una foto con el registro de la sesión."""
+    session_id = _own_session(user)
+    _identity_disabled()
+    img = _decode(_read_frame(file))
+    if img is None:
+        raise HTTPException(status_code=422, detail="No se pudo leer la foto.")
+    try:
+        return identity_guard.verify_image(session_id, img)
+    except identity.IdentityError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.delete("/api/usuarios/{user_id}/rostro", dependencies=[Depends(require("usuarios"))])
+def api_delete_user_face(user_id: int):
+    """El administrador borra el registro facial de un usuario (p. ej. para que lo rehaga)."""
+    target = database.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    deleted = database.delete_face_enrollment(user_id)
+    if target["session_id"]:
+        identity_guard.invalidate(target["session_id"])
+    return {"borrado": deleted}

@@ -15,10 +15,12 @@ import '../notifications.dart';
 import '../theme.dart';
 import '../util.dart';
 import '../widgets/brand.dart';
+import '../widgets/common.dart';
 import 'analytics_screen.dart';
 import 'change_password_screen.dart';
 import 'fleet_screen.dart';
 import 'history_screen.dart';
+import 'identity_screen.dart';
 import 'kss_screen.dart';
 import 'live_screen.dart';
 import 'users_analytics_screen.dart';
@@ -561,6 +563,49 @@ class _LiveChip extends StatelessWidget {
   }
 }
 
+/// Registro facial propio: rehacerlo o borrarlo (derecho de supresión, Ley 1581).
+void _faceMenu(BuildContext context, AppState app) {
+  final registrado = app.identity?['registrado'] == true;
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: C.card,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera_front_outlined),
+            title: Text(registrado ? 'Rehacer el registro de mi rostro' : 'Registrar mi rostro'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const IdentityScreen(mode: 'registro', standalone: true)),
+              );
+            },
+          ),
+          if (registrado)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: C.rojo),
+              title: const Text('Borrar mis datos biométricos', style: TextStyle(color: C.rojo)),
+              subtitle: const Text('Tus datos dejarán de verificarse por rostro.'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                try {
+                  await app.api.deleteJson('/api/identidad/registro');
+                  app.postponeIdentity(); // que no pida registrarse de nuevo enseguida
+                  await app.refreshIdentity();
+                  if (context.mounted) showSnack(context, 'Se borraron tus datos biométricos');
+                } on ApiException catch (e) {
+                  if (context.mounted) showSnack(context, e.message, ok: false);
+                }
+              },
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
 class _UserMenu extends StatelessWidget {
   const _UserMenu({required this.app});
   final AppState app;
@@ -589,6 +634,8 @@ class _UserMenu extends StatelessWidget {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const UsersScreen()));
           case 'password':
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChangePasswordScreen()));
+          case 'face':
+            _faceMenu(context, app);
           case 'logout':
             app.logout();
         }
@@ -620,6 +667,11 @@ class _UserMenu extends StatelessWidget {
           const PopupMenuItem(
             value: 'users',
             child: ListTile(leading: Icon(Icons.manage_accounts_outlined), title: Text('Usuarios y roles')),
+          ),
+        if (app.identity?['aplica'] == true && app.identity?['habilitada'] == true)
+          const PopupMenuItem(
+            value: 'face',
+            child: ListTile(leading: Icon(Icons.face_outlined), title: Text('Mi rostro')),
           ),
         const PopupMenuItem(
           value: 'password',
